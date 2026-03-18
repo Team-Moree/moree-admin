@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Input, Button, Typography, notification } from 'antd';
+import { Card, Input, Button, Typography, App } from 'antd';
 import { LockOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import client from '../api/client';
@@ -30,6 +30,7 @@ export default function Login() {
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { notification } = App.useApp();
 
   const handleLogin = async () => {
     if (!token.trim()) {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Table, Tag, Typography, Input, Result, Button, notification } from 'antd';
+import { Table, Tag, Typography, Input, Result, Button, App } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import client from '../api/client';
@@ -56,6 +56,7 @@ export default function Stores() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [error, setError] = useState(null);
+  const { notification } = App.useApp();
 
   const fetchData = async (keyword = '') => {
     setLoading(true);

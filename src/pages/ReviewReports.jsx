@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Table, Tag, Typography, Result, Button, notification } from 'antd';
+import { Table, Tag, Typography, Result, Button, App } from 'antd';
 import styled from 'styled-components';
 import client from '../api/client';
 
@@ -69,6 +69,7 @@ export default function ReviewReports() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const { notification } = App.useApp();
 
   const fetchData = async () => {
     setLoading(true);

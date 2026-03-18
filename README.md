@@ -55,23 +55,7 @@ npm run build:beta
 
 ## Vercel 배포
 
-### 1. Vercel CLI로 배포
-
-```bash
-# Vercel CLI 설치
-npm i -g vercel
-
-# 로그인
-vercel login
-
-# 배포 (최초 실행 시 프로젝트 설정 진행)
-vercel
-
-# 프로덕션 배포
-vercel --prod
-```
-
-### 2. GitHub 연동 자동 배포
+### GitHub 연동 자동 배포
 
 1. [vercel.com](https://vercel.com)에서 로그인
 2. **Add New Project** 클릭
@@ -86,6 +70,6 @@ vercel --prod
 
 이후 `main` 브랜치에 push하면 자동 배포됩니다.
 
-### 3. Vercel 프로젝트 설정 (vercel.json)
+### Vercel 프로젝트 설정 (vercel.json)
 
 SPA 라우팅을 위해 `vercel.json`이 프로젝트 루트에 포함되어 있습니다. 모든 경로를 `index.html`로 리다이렉트합니다.

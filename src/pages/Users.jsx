@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Table, Input, Avatar, Tag, Typography, Descriptions, Modal, notification } from 'antd';
+import { Table, Input, Avatar, Tag, Typography, Descriptions, Modal, App } from 'antd';
 import { SearchOutlined, UserOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import client from '../api/client';
@@ -16,6 +16,7 @@ export default function Users() {
   const [loading, setLoading] = useState(false);
   const [userId, setUserId] = useState('');
   const [detail, setDetail] = useState(null);
+  const { notification } = App.useApp();
 
   const fetchUser = async (id) => {
     if (!id) return;
