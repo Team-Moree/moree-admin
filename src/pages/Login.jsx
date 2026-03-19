@@ -40,7 +40,7 @@ export default function Login() {
     setLoading(true);
     try {
       sessionStorage.setItem('masterToken', token.trim());
-      const res = await client.get('/health/auth');
+      const res = await client.get('/admin/login');
       const body = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
       if (!body.includes('master-user')) {
         throw new Error('not master');
