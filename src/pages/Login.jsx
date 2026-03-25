@@ -41,8 +41,8 @@ export default function Login() {
     try {
       sessionStorage.setItem('masterToken', token.trim());
       const res = await client.get('/admin/login');
-      const body = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
-      if (!body.includes('master-user')) {
+      const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+      if (String(data.userId) !== '-99') {
         throw new Error('not master');
       }
       notification.success({ message: '로그인 성공', description: '관리자 패널에 진입합니다' });

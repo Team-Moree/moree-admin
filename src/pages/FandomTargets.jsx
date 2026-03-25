@@ -68,7 +68,7 @@ export default function FandomTargets() {
     setLoading(true);
     setError(null);
     try {
-      const params = { size: 100 };
+      const params = { next: '', size: 100 };
       if (keyword) params.search = keyword;
       if (status) params.status = status;
       const res = await client.get('/admin/fandom-target', { params });
