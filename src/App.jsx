@@ -9,6 +9,7 @@ import StoreReports from './pages/StoreReports';
 import ReviewReports from './pages/ReviewReports';
 import Stores from './pages/Stores';
 import Users from './pages/Users';
+import Morees from './pages/Morees';
 
 function PrivateRoute({ children }) {
   const token = sessionStorage.getItem('masterToken');
@@ -33,6 +34,7 @@ export default function App() {
                   <Route path="/store-reports" element={<StoreReports />} />
                   <Route path="/review-reports" element={<ReviewReports />} />
                   <Route path="/users" element={<Users />} />
+                  <Route path="/morees" element={<Morees />} />
                 </Routes>
               </ErrorBoundary>
             </Layout>
