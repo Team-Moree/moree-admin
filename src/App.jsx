@@ -10,6 +10,7 @@ import ReviewReports from './pages/ReviewReports';
 import Stores from './pages/Stores';
 import Users from './pages/Users';
 import Morees from './pages/Morees';
+import BookmarkIcons from './pages/BookmarkIcons';
 
 function PrivateRoute({ children }) {
   const token = sessionStorage.getItem('masterToken');
@@ -35,6 +36,7 @@ export default function App() {
                   <Route path="/review-reports" element={<ReviewReports />} />
                   <Route path="/users" element={<Users />} />
                   <Route path="/morees" element={<Morees />} />
+                  <Route path="/bookmark-icons" element={<BookmarkIcons />} />
                 </Routes>
               </ErrorBoundary>
             </Layout>
