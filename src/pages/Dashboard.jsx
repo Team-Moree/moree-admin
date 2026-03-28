@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Card, Col, Row, Statistic, App } from 'antd';
-import { ShopOutlined, AimOutlined, TagsOutlined, UserOutlined } from '@ant-design/icons';
+import { ShopOutlined, AimOutlined, TagsOutlined, UserOutlined, SmileOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import client from '../api/client';
 
@@ -41,6 +41,11 @@ export default function Dashboard() {
         <Col xs={24} sm={12} lg={6}>
           <Card hoverable loading={loading}>
             <Statistic title="팬덤 타겟" prefix={<AimOutlined />} value={stats?.fandomTargetCount ?? '-'} />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card hoverable loading={loading}>
+            <Statistic title="모리" prefix={<SmileOutlined />} value={stats?.moreeCount ?? '-'} />
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
