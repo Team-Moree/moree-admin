@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  Typography, Result, Button, App, Modal, Form, Input, Card, Empty, Popconfirm, Spin,
+  Typography, Result, Button, App, Modal, Form, InputNumber, Card, Empty, Popconfirm, Spin, Upload,
 } from 'antd';
-import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, InboxOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import client from '../api/client';
 
@@ -57,6 +57,7 @@ export default function BookmarkIcons() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm] = Form.useForm();
   const [creating, setCreating] = useState(false);
+  const [fileList, setFileList] = useState([]);
 
   const { notification } = App.useApp();
 
@@ -93,14 +94,29 @@ export default function BookmarkIcons() {
   // 생성
   const handleCreate = async () => {
     try {
-      const values = await createForm.validateFields();
+      await createForm.validateFields();
+      if (fileList.length === 0) {
+        notification.warning({ message: '이미지를 선택해주세요' });
+        return;
+      }
       setCreating(true);
 
-      await client.post('/admin/bookmark-icon', { iconUrl: values.iconUrl });
+      const formData = new FormData();
+      formData.append('image', fileList[0].originFileObj);
+
+      const width = createForm.getFieldValue('width');
+      if (width) {
+        formData.append('width', width);
+      }
+
+      await client.post('/admin/bookmark/icon', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
 
       notification.success({ message: '아이콘 추가 완료', description: '새 북마크 아이콘이 등록되었습니다.' });
       setCreateOpen(false);
       createForm.resetFields();
+      setFileList([]);
       fetchData();
     } catch (err) {
       if (err.errorFields) return;
@@ -114,13 +130,19 @@ export default function BookmarkIcons() {
   // 삭제
   const handleDelete = async (id) => {
     try {
-      await client.delete(`/admin/bookmark-icon/${id}`);
+      await client.delete(`/admin/bookmark/icon/${id}`);
       notification.success({ message: '삭제 완료', description: '아이콘이 삭제되었습니다.' });
       setData((prev) => prev.filter((item) => item.id !== id));
     } catch (err) {
       const msg = err.response?.data?.message || err.message || '삭제 실패';
       notification.error({ message: '삭제 실패', description: msg });
     }
+  };
+
+  const handleCloseModal = () => {
+    setCreateOpen(false);
+    createForm.resetFields();
+    setFileList([]);
   };
 
   if (error && data.length === 0) {
@@ -158,7 +180,7 @@ export default function BookmarkIcons() {
               <IconId type="secondary">ID: {icon.id}</IconId>
               <Popconfirm
                 title="아이콘 삭제"
-                description="이 아이콘을 삭제하시겠습니까?"
+                description="사용 중인 아이콘일 경우 개발자에게 문의해주세요. 삭제하시겠습니까?"
                 onConfirm={() => handleDelete(icon.id)}
                 okText="삭제"
                 cancelText="취소"
@@ -188,7 +210,7 @@ export default function BookmarkIcons() {
       <Modal
         title="북마크 아이콘 추가"
         open={createOpen}
-        onCancel={() => { setCreateOpen(false); createForm.resetFields(); }}
+        onCancel={handleCloseModal}
         onOk={handleCreate}
         confirmLoading={creating}
         okText="추가"
@@ -197,40 +219,30 @@ export default function BookmarkIcons() {
       >
         <Form form={createForm} layout="vertical">
           <Form.Item
-            label="아이콘 URL"
-            name="iconUrl"
-            rules={[
-              { required: true, message: '아이콘 URL을 입력해주세요' },
-              { type: 'url', message: '올바른 URL 형식을 입력해주세요' },
-            ]}
+            label="아이콘 이미지"
+            required
           >
-            <Input placeholder="https://example.com/icon.png" />
+            <Upload.Dragger
+              accept="image/*"
+              maxCount={1}
+              fileList={fileList}
+              beforeUpload={() => false}
+              onChange={({ fileList: newFileList }) => setFileList(newFileList)}
+              listType="picture"
+            >
+              <p className="ant-upload-drag-icon">
+                <InboxOutlined />
+              </p>
+              <p className="ant-upload-text">클릭하거나 이미지를 드래그하여 업로드</p>
+              <p className="ant-upload-hint">PNG, JPG, SVG 등 이미지 파일을 지원합니다</p>
+            </Upload.Dragger>
           </Form.Item>
-          <Form.Item noStyle shouldUpdate={(prev, cur) => prev.iconUrl !== cur.iconUrl}>
-            {({ getFieldValue }) => {
-              const url = getFieldValue('iconUrl');
-              return url ? (
-                <div style={{ textAlign: 'center', marginBottom: 16 }}>
-                  <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 12 }}>
-                    미리보기
-                  </Typography.Text>
-                  <img
-                    src={url}
-                    alt="preview"
-                    style={{
-                      width: 64,
-                      height: 64,
-                      objectFit: 'contain',
-                      borderRadius: 8,
-                      background: '#fafafa',
-                      border: '1px solid #f0f0f0',
-                    }}
-                    onError={(e) => { e.target.style.display = 'none'; }}
-                    onLoad={(e) => { e.target.style.display = 'inline-block'; }}
-                  />
-                </div>
-              ) : null;
-            }}
+          <Form.Item
+            label="아이콘 너비 (px)"
+            name="width"
+            extra="미입력시 기본값 96px로 리사이즈됩니다"
+          >
+            <InputNumber min={1} max={512} placeholder="96" style={{ width: '100%' }} />
           </Form.Item>
         </Form>
       </Modal>
