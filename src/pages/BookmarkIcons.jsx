@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  Typography, Result, Button, App, Modal, Form, InputNumber, Card, Empty, Popconfirm, Spin, Upload,
+  Typography, Result, Button, App, Modal, Form, InputNumber, Card, Empty, Spin, Upload, Tooltip,
 } from 'antd';
-import { PlusOutlined, DeleteOutlined, InboxOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, InboxOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import client from '../api/client';
 
@@ -58,6 +58,13 @@ export default function BookmarkIcons() {
   const [createForm] = Form.useForm();
   const [creating, setCreating] = useState(false);
   const [fileList, setFileList] = useState([]);
+
+  // 수정 모달
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm] = Form.useForm();
+  const [editing, setEditing] = useState(false);
+  const [editFileList, setEditFileList] = useState([]);
+  const [editTarget, setEditTarget] = useState(null);
 
   const { notification } = App.useApp();
 
@@ -127,16 +134,55 @@ export default function BookmarkIcons() {
     }
   };
 
-  // 삭제
-  const handleDelete = async (id) => {
+  // 수정
+  const handleEditOpen = (icon) => {
+    setEditTarget(icon);
+    setEditFileList([]);
+    editForm.resetFields();
+    setEditOpen(true);
+  };
+
+  const handleEdit = async () => {
     try {
-      await client.delete(`/admin/bookmark/icon/${id}`);
-      notification.success({ message: '삭제 완료', description: '아이콘이 삭제되었습니다.' });
-      setData((prev) => prev.filter((item) => item.id !== id));
+      await editForm.validateFields();
+      if (editFileList.length === 0) {
+        notification.warning({ message: '이미지를 선택해주세요' });
+        return;
+      }
+      setEditing(true);
+
+      const formData = new FormData();
+      formData.append('image', editFileList[0].originFileObj);
+
+      const width = editForm.getFieldValue('width');
+      if (width) {
+        formData.append('width', width);
+      }
+
+      await client.put(`/admin/bookmark/icon/${editTarget.id}`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      notification.success({ message: '수정 완료', description: '아이콘이 수정되었습니다.' });
+      setEditOpen(false);
+      editForm.resetFields();
+      setEditFileList([]);
+      setEditTarget(null);
+      fetchData();
     } catch (err) {
-      const msg = err.response?.data?.message || err.message || '삭제 실패';
-      notification.error({ message: '삭제 실패', description: msg });
+      if (err.errorFields) return;
+      const msg = err.response?.data?.message || err.message || '아이콘 수정 실패';
+      notification.error({ message: '수정 실패', description: msg });
+    } finally {
+      setEditing(false);
     }
+  };
+
+  const handleCloseEditModal = () => {
+    setEditOpen(false);
+    editForm.resetFields();
+    setEditFileList([]);
+    setEditTarget(null);
   };
 
   const handleCloseModal = () => {
@@ -178,17 +224,16 @@ export default function BookmarkIcons() {
             <IconCard key={icon.id} hoverable>
               <IconImage src={icon.iconUrl} alt={`icon-${icon.id}`} />
               <IconId type="secondary">ID: {icon.id}</IconId>
-              <Popconfirm
-                title="아이콘 삭제"
-                description="사용 중인 아이콘일 경우 개발자에게 문의해주세요. 삭제하시겠습니까?"
-                onConfirm={() => handleDelete(icon.id)}
-                okText="삭제"
-                cancelText="취소"
-              >
-                <Button type="text" danger size="small" icon={<DeleteOutlined />}>
-                  삭제
+              <div style={{ display: 'flex', gap: 4 }}>
+                <Button type="text" size="small" icon={<EditOutlined />} onClick={() => handleEditOpen(icon)}>
+                  수정
                 </Button>
-              </Popconfirm>
+                <Tooltip title="삭제는 개발자에게 문의해주세요">
+                  <Button type="text" danger size="small" icon={<DeleteOutlined />} disabled>
+                    삭제
+                  </Button>
+                </Tooltip>
+              </div>
             </IconCard>
           ))}
         </IconGrid>
@@ -228,6 +273,59 @@ export default function BookmarkIcons() {
               fileList={fileList}
               beforeUpload={() => false}
               onChange={({ fileList: newFileList }) => setFileList(newFileList)}
+              listType="picture"
+            >
+              <p className="ant-upload-drag-icon">
+                <InboxOutlined />
+              </p>
+              <p className="ant-upload-text">클릭하거나 이미지를 드래그하여 업로드</p>
+              <p className="ant-upload-hint">PNG, JPG, SVG 등 이미지 파일을 지원합니다</p>
+            </Upload.Dragger>
+          </Form.Item>
+          <Form.Item
+            label="아이콘 너비 (px)"
+            name="width"
+            extra="미입력시 기본값 96px로 리사이즈됩니다"
+          >
+            <InputNumber min={1} max={512} placeholder="96" style={{ width: '100%' }} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 수정 모달 */}
+      <Modal
+        title={`북마크 아이콘 수정 (ID: ${editTarget?.id ?? ''})`}
+        open={editOpen}
+        onCancel={handleCloseEditModal}
+        onOk={handleEdit}
+        confirmLoading={editing}
+        okText="수정"
+        cancelText="취소"
+        width={480}
+      >
+        {editTarget && (
+          <div style={{ textAlign: 'center', marginBottom: 16 }}>
+            <Typography.Text type="secondary">현재 아이콘</Typography.Text>
+            <div style={{ marginTop: 8 }}>
+              <img
+                src={editTarget.iconUrl}
+                alt={`current-icon-${editTarget.id}`}
+                style={{ width: 64, height: 64, objectFit: 'contain', borderRadius: 8, background: '#fafafa' }}
+              />
+            </div>
+          </div>
+        )}
+        <Form form={editForm} layout="vertical">
+          <Form.Item
+            label="새 아이콘 이미지"
+            required
+          >
+            <Upload.Dragger
+              accept="image/*"
+              maxCount={1}
+              fileList={editFileList}
+              beforeUpload={() => false}
+              onChange={({ fileList: newFileList }) => setEditFileList(newFileList)}
               listType="picture"
             >
               <p className="ant-upload-drag-icon">
