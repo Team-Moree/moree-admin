@@ -11,6 +11,7 @@ import {
   UserOutlined,
   LogoutOutlined,
   SmileOutlined,
+  BookOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
 } from '@ant-design/icons';
@@ -54,6 +55,7 @@ const menuItems = [
   { key: '/review-reports', icon: <CommentOutlined />, label: '리뷰 신고' },
   { key: '/users', icon: <UserOutlined />, label: '유저' },
   { key: '/morees', icon: <SmileOutlined />, label: '모리' },
+  { key: '/bookmark-icons', icon: <BookOutlined />, label: '북마크 아이콘' },
 ];
 
 export default function Layout({ children }) {
