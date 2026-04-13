@@ -44,10 +44,12 @@ npm run build:beta
 
 ## 환경 설정
 
-| 파일 | API 대상 |
-|------|----------|
+| 파일 | 기본 API URL |
+|------|--------------|
 | `.env.local` | `http://localhost:8080` |
 | `.env.beta` | `https://api.moree.app` |
+
+주소 검색 기능을 사용하는 환경에는 `VITE_NAVER_MAP_KEY`를 설정합니다.
 
 ## 로그인
 
@@ -66,6 +68,7 @@ npm run build:beta
    - **Output Directory**: `dist`
 5. **Environment Variables** 설정:
    - `VITE_API_BASE_URL` = `https://api.moree.app`
+   - `VITE_NAVER_MAP_KEY` = NAVER Maps `ncpKeyId`
 6. **Deploy** 클릭
 
 이후 `main` 브랜치에 push하면 자동 배포됩니다.
