@@ -51,7 +51,7 @@ const menuItems = [
   { key: '/fandom-categories', icon: <TagsOutlined />, label: '팬덤 카테고리' },
   { key: '/fandom-targets', icon: <AimOutlined />, label: '팬덤 타겟' },
   { key: '/stores', icon: <ShopOutlined />, label: '스토어' },
-  { key: '/store-reports', icon: <WarningOutlined />, label: '스토어 신고' },
+  { key: '/store-reports', icon: <WarningOutlined />, label: '스토어 신고/수정' },
   { key: '/review-reports', icon: <CommentOutlined />, label: '리뷰 신고' },
   { key: '/users', icon: <UserOutlined />, label: '유저' },
   { key: '/morees', icon: <SmileOutlined />, label: '모리' },
