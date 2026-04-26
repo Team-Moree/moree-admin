@@ -406,9 +406,6 @@ export default function ReviewReports() {
       </ReviewContent>
       <ReviewMeta>
         <Typography.Text type="secondary">{getStoreLabel(review) || '상점명 없음'}</Typography.Text>
-        {!getStoreLabel(review) && review?.storeId && (
-          <Typography.Text type="secondary">ID {review.storeId}</Typography.Text>
-        )}
         {review?.isHidden && <Tag color="red" style={{ marginInlineEnd: 0 }}>숨김</Tag>}
       </ReviewMeta>
     </ReviewSummary>
@@ -512,12 +509,6 @@ export default function ReviewReports() {
       key: 'content',
       ellipsis: true,
       render: renderContent,
-    },
-    {
-      title: '신고자 ID',
-      key: 'reporter',
-      width: 100,
-      render: (_, record) => renderReporter(record),
     },
     {
       title: '처리 상태',
