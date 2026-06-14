@@ -12,6 +12,7 @@ import {
   LogoutOutlined,
   SmileOutlined,
   BookOutlined,
+  BellOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
 } from '@ant-design/icons';
@@ -56,6 +57,7 @@ const menuItems = [
   { key: '/users', icon: <UserOutlined />, label: '유저' },
   { key: '/morees', icon: <SmileOutlined />, label: '모리' },
   { key: '/bookmark-icons', icon: <BookOutlined />, label: '북마크 아이콘' },
+  { key: '/notifications', icon: <BellOutlined />, label: '푸시 알림 (QA)' },
 ];
 
 export default function Layout({ children }) {
