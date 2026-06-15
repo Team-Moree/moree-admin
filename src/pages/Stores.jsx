@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Descriptions, Image, Spin, Popconfirm, Alert, Input } from 'antd';
+import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Descriptions, Image, Spin, Popconfirm, Alert, Input, Form, InputNumber, DatePicker } from 'antd';
+import { EditOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
+import dayjs from 'dayjs';
 import client from '../api/client';
 
 const Header = styled.div`
@@ -37,7 +39,15 @@ const STATUS_MAP = {
   APPROVED: { color: 'green', label: '승인' },
   PENDING: { color: 'orange', label: '대기' },
   REJECTED: { color: 'red', label: '거절' },
+  HIDDEN: { color: 'default', label: '숨김' },
 };
+
+const STATUS_CHANGE_OPTIONS = [
+  { value: 'PENDING', label: '대기 (PENDING)' },
+  { value: 'APPROVED', label: '승인 (APPROVED)' },
+  { value: 'REJECTED', label: '거절 (REJECTED)' },
+  { value: 'HIDDEN', label: '숨김 (HIDDEN)' },
+];
 
 const CATEGORY_COLORS = {
   CHARACTER: 'magenta',
@@ -90,15 +100,44 @@ export default function Stores() {
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [statusUpdatingId, setStatusUpdatingId] = useState(null);
+  const [patchOpen, setPatchOpen] = useState(false);
+  const [patchLoading, setPatchLoading] = useState(false);
+  const [pendingNextStatus, setPendingNextStatus] = useState(null);
+  const [patchForm] = Form.useForm();
   const { notification } = App.useApp();
   const isAllStatusView = !statusFilter || statusFilter === ALL_STATUS;
   const isPendingDetail = detail?.approvalStatus === 'PENDING';
   const modalTitle = isPendingDetail ? '스토어 검토' : '스토어 상세';
+
+  const handleOpenPatch = () => {
+    if (!detail) return;
+    patchForm.resetFields();
+    patchForm.setFieldsValue({
+      startDate: detail.startDate ? dayjs(detail.startDate) : null,
+      finishDate: detail.finishDate ? dayjs(detail.finishDate) : null,
+    });
+    setPatchOpen(true);
+  };
+
+  const patchButton = (
+    <Button
+      key="patch"
+      icon={<EditOutlined />}
+      onClick={handleOpenPatch}
+      disabled={!detail}
+    >
+      수동 수정
+    </Button>
+  );
+
   const modalFooter = isPendingDetail ? (
     <ModalFooter>
-      <Button key="cancel" onClick={() => setDetail(null)}>
-        닫기
-      </Button>
+      <Space>
+        <Button key="cancel" onClick={() => setDetail(null)}>
+          닫기
+        </Button>
+        {patchButton}
+      </Space>
       <Space>
         <Popconfirm
           key="reject"
@@ -125,9 +164,45 @@ export default function Stores() {
       </Space>
     </ModalFooter>
   ) : (
-    <Button key="close" onClick={() => setDetail(null)}>
-      닫기
-    </Button>
+    <ModalFooter>
+      <Space>
+        {patchButton}
+        <Select
+          placeholder="상태 변경"
+          style={{ width: 160 }}
+          value={pendingNextStatus}
+          onChange={setPendingNextStatus}
+          options={STATUS_CHANGE_OPTIONS.filter((opt) => opt.value !== detail?.approvalStatus)}
+        />
+        <Popconfirm
+          key="change-status"
+          title={pendingNextStatus
+            ? `스토어 상태를 ${STATUS_MAP[pendingNextStatus]?.label || pendingNextStatus}(으)로 변경할까요?`
+            : '변경할 상태를 선택해주세요.'}
+          okText="변경"
+          cancelText="취소"
+          disabled={!pendingNextStatus}
+          onConfirm={() => handleStatusChange(detail.storeId, pendingNextStatus)}
+        >
+          <Button
+            type="primary"
+            disabled={!pendingNextStatus}
+            loading={statusUpdatingId === detail?.storeId}
+          >
+            변경
+          </Button>
+        </Popconfirm>
+      </Space>
+      <Button
+        key="close"
+        onClick={() => {
+          setDetail(null);
+          setPendingNextStatus(null);
+        }}
+      >
+        닫기
+      </Button>
+    </ModalFooter>
   );
 
   const fetchData = useCallback(async ({ cursor = '', status, search, append = false } = {}) => {
@@ -173,6 +248,7 @@ export default function Stores() {
 
   const handleOpenDetail = async (storeId) => {
     setDetail(null);
+    setPendingNextStatus(null);
     setDetailLoading(true);
     try {
       const res = await client.get(`/admin/store/${storeId}`);
@@ -182,6 +258,67 @@ export default function Stores() {
       notification.error({ message: '상세 조회 실패', description: msg });
     } finally {
       setDetailLoading(false);
+    }
+  };
+
+  const handlePatchSubmit = async () => {
+    if (!detail) return;
+    let values;
+    try {
+      values = await patchForm.validateFields();
+    } catch (err) {
+      if (err?.errorFields) return;
+      throw err;
+    }
+
+    const { latitude, longitude, startDate, finishDate } = values;
+    const hasLat = latitude !== undefined && latitude !== null;
+    const hasLon = longitude !== undefined && longitude !== null;
+    if (hasLat !== hasLon) {
+      notification.error({
+        message: '입력 오류',
+        description: '위도/경도는 둘 다 함께 입력해야 합니다.',
+      });
+      return;
+    }
+
+    const payload = {};
+    if (hasLat && hasLon) {
+      payload.latitude = latitude;
+      payload.longitude = longitude;
+    }
+    if (startDate) payload.startDate = dayjs(startDate).format('YYYY-MM-DD');
+    if (finishDate) payload.finishDate = dayjs(finishDate).format('YYYY-MM-DD');
+
+    if (Object.keys(payload).length === 0) {
+      notification.warning({
+        message: '변경할 항목이 없습니다',
+        description: '변경하려는 필드를 하나 이상 입력해주세요.',
+      });
+      return;
+    }
+
+    setPatchLoading(true);
+    try {
+      await client.patch(`/admin/store/${detail.storeId}`, payload);
+      notification.success({
+        message: '수정 완료',
+        description: '스토어 정보가 수정되었습니다.',
+      });
+      setPatchOpen(false);
+      patchForm.resetFields();
+
+      try {
+        const res = await client.get(`/admin/store/${detail.storeId}`);
+        setDetail(res.data);
+      } catch {
+        // detail 재조회 실패는 무시 (목록만 갱신)
+      }
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || '스토어 수정 실패';
+      notification.error({ message: '수정 실패', description: msg });
+    } finally {
+      setPatchLoading(false);
     }
   };
 
@@ -203,6 +340,8 @@ export default function Stores() {
       setDetail((prev) => (prev && prev.storeId === storeId
         ? { ...prev, approvalStatus: nextStatus }
         : prev));
+
+      setPendingNextStatus(null);
 
       if (statusFilter === 'PENDING') {
         fetchData({ status: statusFilter, search: searchKeyword });
@@ -341,6 +480,7 @@ export default function Stores() {
         onCancel={() => {
           setDetail(null);
           setDetailLoading(false);
+          setPendingNextStatus(null);
         }}
         footer={modalFooter}
         width={820}
@@ -439,6 +579,65 @@ export default function Stores() {
             </Descriptions>
           </Space>
         )}
+      </Modal>
+      <Modal
+        title="스토어 직접 수정"
+        open={patchOpen}
+        onCancel={() => {
+          setPatchOpen(false);
+          patchForm.resetFields();
+        }}
+        onOk={handlePatchSubmit}
+        confirmLoading={patchLoading}
+        okText="수정"
+        cancelText="취소"
+        destroyOnClose
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="빈 칸은 변경하지 않음"
+          description="좌표는 위도/경도를 함께 입력해야 합니다. 승인 상태는 본 화면에서 변경할 수 없으며, 상세 화면의 승인/거절 버튼을 사용해주세요."
+        />
+        <Form form={patchForm} layout="vertical" preserve={false}>
+          <Form.Item label="좌표" style={{ marginBottom: 0 }}>
+            <Space.Compact style={{ width: '100%' }}>
+              <Form.Item
+                name="latitude"
+                noStyle
+                rules={[
+                  { type: 'number', min: -90, max: 90, message: '-90 ~ 90 범위' },
+                ]}
+              >
+                <InputNumber
+                  placeholder="위도 (latitude)"
+                  step={0.000001}
+                  style={{ width: '50%' }}
+                />
+              </Form.Item>
+              <Form.Item
+                name="longitude"
+                noStyle
+                rules={[
+                  { type: 'number', min: -180, max: 180, message: '-180 ~ 180 범위' },
+                ]}
+              >
+                <InputNumber
+                  placeholder="경도 (longitude)"
+                  step={0.000001}
+                  style={{ width: '50%' }}
+                />
+              </Form.Item>
+            </Space.Compact>
+          </Form.Item>
+          <Form.Item name="startDate" label="시작일">
+            <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
+          </Form.Item>
+          <Form.Item name="finishDate" label="종료일">
+            <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   );
