@@ -42,7 +42,7 @@ const STATUS_MAP = {
   HIDDEN: { color: 'default', label: '숨김' },
 };
 
-const STATUS_OPTIONS = [
+const STATUS_CHANGE_OPTIONS = [
   { value: 'PENDING', label: '대기 (PENDING)' },
   { value: 'APPROVED', label: '승인 (APPROVED)' },
   { value: 'REJECTED', label: '거절 (REJECTED)' },
@@ -102,6 +102,7 @@ export default function Stores() {
   const [statusUpdatingId, setStatusUpdatingId] = useState(null);
   const [patchOpen, setPatchOpen] = useState(false);
   const [patchLoading, setPatchLoading] = useState(false);
+  const [pendingNextStatus, setPendingNextStatus] = useState(null);
   const [patchForm] = Form.useForm();
   const { notification } = App.useApp();
   const isAllStatusView = !statusFilter || statusFilter === ALL_STATUS;
@@ -114,7 +115,6 @@ export default function Stores() {
     patchForm.setFieldsValue({
       startDate: detail.startDate ? dayjs(detail.startDate) : null,
       finishDate: detail.finishDate ? dayjs(detail.finishDate) : null,
-      approvalStatus: detail.approvalStatus || undefined,
     });
     setPatchOpen(true);
   };
@@ -165,8 +165,41 @@ export default function Stores() {
     </ModalFooter>
   ) : (
     <ModalFooter>
-      {patchButton}
-      <Button key="close" onClick={() => setDetail(null)}>
+      <Space>
+        {patchButton}
+        <Select
+          placeholder="상태 변경"
+          style={{ width: 160 }}
+          value={pendingNextStatus}
+          onChange={setPendingNextStatus}
+          options={STATUS_CHANGE_OPTIONS.filter((opt) => opt.value !== detail?.approvalStatus)}
+        />
+        <Popconfirm
+          key="change-status"
+          title={pendingNextStatus
+            ? `스토어 상태를 ${STATUS_MAP[pendingNextStatus]?.label || pendingNextStatus}(으)로 변경할까요?`
+            : '변경할 상태를 선택해주세요.'}
+          okText="변경"
+          cancelText="취소"
+          disabled={!pendingNextStatus}
+          onConfirm={() => handleStatusChange(detail.storeId, pendingNextStatus)}
+        >
+          <Button
+            type="primary"
+            disabled={!pendingNextStatus}
+            loading={statusUpdatingId === detail?.storeId}
+          >
+            변경
+          </Button>
+        </Popconfirm>
+      </Space>
+      <Button
+        key="close"
+        onClick={() => {
+          setDetail(null);
+          setPendingNextStatus(null);
+        }}
+      >
         닫기
       </Button>
     </ModalFooter>
@@ -215,6 +248,7 @@ export default function Stores() {
 
   const handleOpenDetail = async (storeId) => {
     setDetail(null);
+    setPendingNextStatus(null);
     setDetailLoading(true);
     try {
       const res = await client.get(`/admin/store/${storeId}`);
@@ -237,7 +271,7 @@ export default function Stores() {
       throw err;
     }
 
-    const { latitude, longitude, startDate, finishDate, approvalStatus } = values;
+    const { latitude, longitude, startDate, finishDate } = values;
     const hasLat = latitude !== undefined && latitude !== null;
     const hasLon = longitude !== undefined && longitude !== null;
     if (hasLat !== hasLon) {
@@ -255,7 +289,6 @@ export default function Stores() {
     }
     if (startDate) payload.startDate = dayjs(startDate).format('YYYY-MM-DD');
     if (finishDate) payload.finishDate = dayjs(finishDate).format('YYYY-MM-DD');
-    if (approvalStatus) payload.approvalStatus = approvalStatus;
 
     if (Object.keys(payload).length === 0) {
       notification.warning({
@@ -280,14 +313,6 @@ export default function Stores() {
         setDetail(res.data);
       } catch {
         // detail 재조회 실패는 무시 (목록만 갱신)
-      }
-
-      if (payload.approvalStatus) {
-        setData((prev) => prev.map((item) => (
-          item.storeId === detail.storeId
-            ? { ...item, approvalStatus: payload.approvalStatus }
-            : item
-        )));
       }
     } catch (err) {
       const msg = err.response?.data?.message || err.message || '스토어 수정 실패';
@@ -315,6 +340,8 @@ export default function Stores() {
       setDetail((prev) => (prev && prev.storeId === storeId
         ? { ...prev, approvalStatus: nextStatus }
         : prev));
+
+      setPendingNextStatus(null);
 
       if (statusFilter === 'PENDING') {
         fetchData({ status: statusFilter, search: searchKeyword });
@@ -453,6 +480,7 @@ export default function Stores() {
         onCancel={() => {
           setDetail(null);
           setDetailLoading(false);
+          setPendingNextStatus(null);
         }}
         footer={modalFooter}
         width={820}
@@ -570,7 +598,7 @@ export default function Stores() {
           showIcon
           style={{ marginBottom: 16 }}
           message="빈 칸은 변경하지 않음"
-          description="좌표는 위도/경도를 함께 입력해야 합니다. 승인 변경 푸시 알림은 발송되지 않습니다."
+          description="좌표는 위도/경도를 함께 입력해야 합니다. 승인 상태는 본 화면에서 변경할 수 없으며, 상세 화면의 승인/거절 버튼을 사용해주세요."
         />
         <Form form={patchForm} layout="vertical" preserve={false}>
           <Form.Item label="좌표" style={{ marginBottom: 0 }}>
@@ -608,9 +636,6 @@ export default function Stores() {
           </Form.Item>
           <Form.Item name="finishDate" label="종료일">
             <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
-          </Form.Item>
-          <Form.Item name="approvalStatus" label="승인 상태">
-            <Select allowClear placeholder="변경하지 않음" options={STATUS_OPTIONS} />
           </Form.Item>
         </Form>
       </Modal>
