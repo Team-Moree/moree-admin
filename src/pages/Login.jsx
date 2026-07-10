@@ -4,6 +4,8 @@ import { Card, Input, Button, Typography, App } from 'antd';
 import { LockOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import client from '../api/client';
+import EnvBadge from '../components/EnvBadge';
+import { ENV_PRIMARY_COLOR } from '../config/env';
 
 const { Title, Text } = Typography;
 
@@ -59,7 +61,10 @@ export default function Login() {
     <Wrapper>
       <LoginCard>
         <LogoArea>
-          <Title level={2} style={{ margin: 0, color: '#6366f1' }}>Moree Admin</Title>
+          <Title level={2} style={{ margin: 0, color: ENV_PRIMARY_COLOR }}>Moree Admin</Title>
+          <div style={{ margin: '12px 0 8px' }}>
+            <EnvBadge />
+          </div>
           <Text type="secondary">마스터 토큰으로 로그인</Text>
         </LogoArea>
         <Input.Password
