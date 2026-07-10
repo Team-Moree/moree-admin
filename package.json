@@ -6,8 +6,11 @@
   "scripts": {
     "start": "vite",
     "start:beta": "vite --mode beta",
+    "start:real": "vite --mode real",
     "build": "vite build",
     "build:beta": "vite build --mode beta",
+    "build:real": "vite build --mode real",
+    "vercel-build": "if [ \"$VERCEL_ENV\" = \"production\" ]; then npm run build:real; else npm run build:beta; fi",
     "preview": "vite preview"
   },
   "dependencies": {

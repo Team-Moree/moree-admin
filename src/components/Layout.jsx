@@ -17,6 +17,8 @@ import {
   MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import styled from 'styled-components';
+import EnvBadge from './EnvBadge';
+import { ENV_LABEL, ENV_BADGE_COLOR } from '../config/env';
 
 const { Header, Sider, Content } = AntLayout;
 
@@ -75,7 +77,10 @@ export default function Layout({ children }) {
     <AntLayout style={{ minHeight: '100vh' }}>
       <Sider trigger={null} collapsible collapsed={collapsed} theme="light">
         <Logo $collapsed={collapsed} $color={themeToken.colorPrimary}>
-          {collapsed ? 'M' : 'Moree Admin'}
+          {collapsed ? 'M' : `Moree Admin`}
+          {!collapsed && (
+            <span style={{ fontSize: 11, marginLeft: 6, opacity: 0.85 }}>{ENV_LABEL}</span>
+          )}
         </Logo>
         <Menu
           mode="inline"
@@ -85,15 +90,18 @@ export default function Layout({ children }) {
         />
       </Sider>
       <AntLayout>
-        <StyledHeader>
+        <StyledHeader style={{ borderTop: `3px solid ${ENV_BADGE_COLOR}` }}>
           <Button
             type="text"
             icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
             onClick={() => setCollapsed(!collapsed)}
           />
-          <Button type="text" icon={<LogoutOutlined />} onClick={handleLogout}>
-            로그아웃
-          </Button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <EnvBadge />
+            <Button type="text" icon={<LogoutOutlined />} onClick={handleLogout}>
+              로그아웃
+            </Button>
+          </div>
         </StyledHeader>
         <StyledContent>{children}</StyledContent>
       </AntLayout>
