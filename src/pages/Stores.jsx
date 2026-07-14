@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Descriptions, Image, Spin, Popconfirm, Alert, Input, Form, InputNumber, DatePicker } from 'antd';
-import { EditOutlined } from '@ant-design/icons';
+import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Descriptions, Image, Spin, Popconfirm, Alert, Input, Form, DatePicker, Upload, Switch } from 'antd';
+import { EditOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import dayjs from 'dayjs';
 import client from '../api/client';
@@ -35,6 +35,38 @@ const StyledTable = styled(Table)`
   }
 `;
 
+const StoreForm = styled(Form)`
+  .store-form-section-title {
+    margin: 24px 0 12px !important;
+    padding-top: 18px;
+    border-top: 1px solid #f0f0f0;
+  }
+
+  .store-form-section-title:first-child {
+    margin-top: 0 !important;
+    padding-top: 0;
+    border-top: 0;
+  }
+
+  .store-link-row {
+    display: grid !important;
+    grid-template-columns: 180px minmax(280px, 1fr) auto;
+    gap: 8px;
+    align-items: start;
+    width: 100%;
+  }
+
+  .store-link-row .ant-form-item {
+    margin-bottom: 8px;
+  }
+
+  @media (max-width: 720px) {
+    .store-link-row {
+      grid-template-columns: 1fr;
+    }
+  }
+`;
+
 const STATUS_MAP = {
   APPROVED: { color: 'green', label: '승인' },
   PENDING: { color: 'orange', label: '대기' },
@@ -66,6 +98,20 @@ const CATEGORY_COLORS = {
 
 const PAGE_SIZE = 50;
 const ALL_STATUS = 'ALL';
+const STORE_CREATE_ENDPOINT = '/store';
+const DAUM_POSTCODE_SCRIPT_URL = 'https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
+const NAVER_MAPS_SERVICE_WAIT_MS = 5000;
+const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
+const TIME_PATTERN = /^([01][0-9]|2[0-4]):[0-5][0-9]$/;
+const LINK_TYPE_OPTIONS = [
+  { value: 'HOMEPAGE', label: '홈페이지' },
+  { value: 'PRE_RESERVATION', label: '사전예약' },
+  { value: 'INSTAGRAM', label: '인스타그램' },
+  { value: 'TWITTER', label: '트위터' },
+  { value: 'COMMUNITY', label: '커뮤니티' },
+  { value: 'OPEN_CHAT', label: '오픈채팅' },
+];
+const LINK_TYPE_LABEL_MAP = Object.fromEntries(LINK_TYPE_OPTIONS.map((option) => [option.value, option.label]));
 const KEYWORD_TAG_STYLE = {
   marginInlineEnd: 0,
   color: '#44546f',
@@ -88,7 +134,213 @@ const normalizeKeywords = (keywords) => {
   return [];
 };
 
+let daumPostcodeScriptPromise;
+let naverMapsScriptPromise;
+
+const loadExternalScript = (src) => new Promise((resolve, reject) => {
+  const existingScript = document.querySelector(`script[src="${src}"]`);
+  if (existingScript) {
+    existingScript.addEventListener('load', resolve, { once: true });
+    existingScript.addEventListener('error', reject, { once: true });
+    if (existingScript.dataset.loaded === 'true') resolve();
+    return;
+  }
+
+  const script = document.createElement('script');
+  script.src = src;
+  script.async = true;
+  script.onload = () => {
+    script.dataset.loaded = 'true';
+    resolve();
+  };
+  script.onerror = reject;
+  document.head.appendChild(script);
+});
+
+const loadDaumPostcode = async () => {
+  if (window.daum?.Postcode) return;
+  daumPostcodeScriptPromise ||= loadExternalScript(DAUM_POSTCODE_SCRIPT_URL);
+  await daumPostcodeScriptPromise;
+};
+
+const getNaverMapsScriptUrl = (clientId) =>
+  `https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${encodeURIComponent(clientId)}&submodules=geocoder`;
+
+const waitForNaverMapsService = () => new Promise((resolve, reject) => {
+  const startedAt = Date.now();
+
+  const checkService = () => {
+    if (window.naver?.maps?.Service) {
+      resolve();
+      return;
+    }
+
+    if (Date.now() - startedAt >= NAVER_MAPS_SERVICE_WAIT_MS) {
+      reject(new Error('NAVER Maps Geocoder를 사용할 수 없습니다. 키, 허용 도메인, Geocoding API 설정을 확인하세요.'));
+      return;
+    }
+
+    window.setTimeout(checkService, 100);
+  };
+
+  checkService();
+});
+
+const loadNaverMaps = async (clientId) => {
+  if (window.naver?.maps?.Service) return;
+  naverMapsScriptPromise ||= loadExternalScript(getNaverMapsScriptUrl(clientId));
+  await naverMapsScriptPromise;
+  await waitForNaverMapsService();
+};
+
+const geocodeAddress = async (address, clientId) => {
+  await loadNaverMaps(clientId);
+
+  return new Promise((resolve, reject) => {
+    window.naver.maps.Service.geocode({ query: address }, (status, response) => {
+      const addressResult = response?.v2?.addresses?.[0];
+
+      if (status !== window.naver.maps.Service.Status.OK || !addressResult) {
+        reject(new Error('주소 좌표를 찾을 수 없습니다.'));
+        return;
+      }
+
+      resolve({
+        latitude: Number(addressResult.y),
+        longitude: Number(addressResult.x),
+      });
+    });
+  });
+};
+
+const normalizeText = (value) => (typeof value === 'string' ? value.trim() : value);
+
+const normalizeOptionalText = (value) => {
+  const normalizedValue = normalizeText(value);
+  return normalizedValue || null;
+};
+
+const compactList = (items) => (Array.isArray(items) ? items.filter(Boolean) : []);
+
+const getUploadedImageUrl = (data) => (
+  data?.imageUrl
+  || data?.url
+  || data?.result?.imageUrl
+  || data?.result?.url
+  || data?.results?.[0]?.imageUrl
+  || data?.results?.[0]?.url
+  || data?.imageUrls?.[0]
+);
+
+const buildOperationHours = (values) => {
+  if (values.useCustomOperationHours) {
+    return WEEKDAYS.map((day, index) => ({
+      day,
+      open: normalizeText(values.operationHours?.[index]?.open),
+      close: normalizeText(values.operationHours?.[index]?.close),
+    }));
+  }
+
+  return WEEKDAYS.map((day) => ({
+    day,
+    open: normalizeText(values.commonOpen),
+    close: normalizeText(values.commonClose),
+  }));
+};
+
+const buildStoreCreateRequest = (values, imageUrls) => {
+  const request = {
+    title: normalizeText(values.title),
+    fandomCategoryIds: values.fandomCategoryIds,
+    imageUrls,
+    description: normalizeText(values.description),
+    keywords: compactList(values.keywords).map(normalizeText).filter(Boolean),
+    operationHours: buildOperationHours(values),
+    location: {
+      latitude: Number(values.latitude),
+      longitude: Number(values.longitude),
+      zip: normalizeText(values.zip),
+      address: normalizeText(values.address),
+      addressDetail: normalizeText(values.addressDetail),
+    },
+    phoneNumber: normalizeOptionalText(values.phoneNumber),
+    links: compactList(values.links)
+      .filter((item) => item?.type || item?.link)
+      .map((item) => ({
+        type: normalizeText(item.type),
+        link: normalizeText(item.link),
+      })),
+  };
+
+  if (values.period?.[0] && values.period?.[1]) {
+    request.period = {
+      start: dayjs(values.period[0]).format('YYYY-MM-DD'),
+      finish: dayjs(values.period[1]).format('YYYY-MM-DD'),
+    };
+  }
+
+  return request;
+};
+
+const buildStoreEditRequest = (values) => ({
+  title: normalizeText(values.title),
+  description: normalizeText(values.description),
+  address: normalizeText(values.address),
+  addressDetail: normalizeOptionalText(values.addressDetail),
+  zip: normalizeText(values.zip),
+  latitude: Number(values.latitude),
+  longitude: Number(values.longitude),
+  phoneNumber: normalizeOptionalText(values.phoneNumber),
+  startDate: values.period?.[0] ? dayjs(values.period[0]).format('YYYY-MM-DD') : null,
+  finishDate: values.period?.[1] ? dayjs(values.period[1]).format('YYYY-MM-DD') : null,
+  operationHours: buildOperationHours(values),
+  links: compactList(values.links)
+    .filter((item) => item?.type || item?.link)
+    .map((item) => ({
+      type: normalizeText(item.type),
+      link: normalizeText(item.link),
+    })),
+});
+
+const getStoreEditFormValues = (store) => {
+  const operationHours = Array.isArray(store?.operationHours) ? store.operationHours : [];
+  const firstHour = operationHours[0] || {};
+  const hasSameHours = operationHours.length === WEEKDAYS.length
+    && operationHours.every((item) => item?.open === firstHour.open && item?.close === firstHour.close);
+  const operationHourByDay = new Map(operationHours.map((item) => [item.day, item]));
+  const useCustomOperationHours = operationHours.length > 0 && !hasSameHours;
+
+  return {
+    title: store?.title || '',
+    description: store?.description || '',
+    address: store?.address || '',
+    addressDetail: store?.addressDetail || '',
+    zip: store?.zip || '',
+    latitude: store?.latitude ?? '',
+    longitude: store?.longitude ?? '',
+    phoneNumber: store?.phoneNumber || '',
+    period: store?.startDate && store?.finishDate
+      ? [dayjs(store.startDate), dayjs(store.finishDate)]
+      : null,
+    useCustomOperationHours,
+    commonOpen: firstHour.open || '10:00',
+    commonClose: firstHour.close || '20:00',
+    operationHours: WEEKDAYS.map((day) => ({
+      open: operationHourByDay.get(day)?.open || firstHour.open || '10:00',
+      close: operationHourByDay.get(day)?.close || firstHour.close || '20:00',
+    })),
+    links: Array.isArray(store?.links)
+      ? store.links.map((item) => ({
+        type: item.type || item.title || '',
+        link: item.link || '',
+      }))
+      : [],
+  };
+};
+
 export default function Stores() {
+  const [createForm] = Form.useForm();
+  const [editForm] = Form.useForm();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -100,33 +352,30 @@ export default function Stores() {
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [statusUpdatingId, setStatusUpdatingId] = useState(null);
-  const [patchOpen, setPatchOpen] = useState(false);
-  const [patchLoading, setPatchLoading] = useState(false);
   const [pendingNextStatus, setPendingNextStatus] = useState(null);
-  const [patchForm] = Form.useForm();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createFileList, setCreateFileList] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [addressSearching, setAddressSearching] = useState(false);
+  const [useCustomOperationHours, setUseCustomOperationHours] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editAddressSearching, setEditAddressSearching] = useState(false);
+  const [useCustomEditOperationHours, setUseCustomEditOperationHours] = useState(false);
   const { notification } = App.useApp();
   const isAllStatusView = !statusFilter || statusFilter === ALL_STATUS;
   const isPendingDetail = detail?.approvalStatus === 'PENDING';
   const modalTitle = isPendingDetail ? '스토어 검토' : '스토어 상세';
 
-  const handleOpenPatch = () => {
-    if (!detail) return;
-    patchForm.resetFields();
-    patchForm.setFieldsValue({
-      startDate: detail.startDate ? dayjs(detail.startDate) : null,
-      finishDate: detail.finishDate ? dayjs(detail.finishDate) : null,
-    });
-    setPatchOpen(true);
-  };
-
-  const patchButton = (
+  const editButton = (
     <Button
-      key="patch"
+      key="edit"
       icon={<EditOutlined />}
-      onClick={handleOpenPatch}
+      onClick={() => handleOpenEdit()}
       disabled={!detail}
     >
-      수동 수정
+      정보 수정
     </Button>
   );
 
@@ -136,7 +385,7 @@ export default function Stores() {
         <Button key="cancel" onClick={() => setDetail(null)}>
           닫기
         </Button>
-        {patchButton}
+        {editButton}
       </Space>
       <Space>
         <Popconfirm
@@ -166,7 +415,7 @@ export default function Stores() {
   ) : (
     <ModalFooter>
       <Space>
-        {patchButton}
+        {editButton}
         <Select
           placeholder="상태 변경"
           style={{ width: 160 }}
@@ -232,6 +481,21 @@ export default function Stores() {
     fetchData({ status: statusFilter, search: searchKeyword });
   }, [fetchData, searchKeyword, statusFilter]);
 
+  const fetchCategories = useCallback(async () => {
+    try {
+      const res = await client.get('/shared/fandom-category');
+      const list = Array.isArray(res.data?.results) ? res.data.results : Array.isArray(res.data) ? res.data : [];
+      setCategories(list);
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || '팬덤 카테고리 조회 실패';
+      notification.error({ message: '카테고리 조회 실패', description: msg });
+    }
+  }, [notification]);
+
+  useEffect(() => {
+    fetchCategories();
+  }, [fetchCategories]);
+
   const handleStatusFilter = (value) => {
     setStatusFilter(value);
   };
@@ -261,64 +525,281 @@ export default function Stores() {
     }
   };
 
-  const handlePatchSubmit = async () => {
+  const handleOpenEdit = () => {
     if (!detail) return;
+    setEditOpen(true);
+  };
+
+  const handleCloseEdit = () => {
+    setEditOpen(false);
+    setEditSaving(false);
+    setEditAddressSearching(false);
+    setUseCustomEditOperationHours(false);
+    editForm.resetFields();
+  };
+
+  useEffect(() => {
+    if (!editOpen || !detail) return;
+
+    const formValues = getStoreEditFormValues(detail);
+    editForm.resetFields();
+    editForm.setFieldsValue(formValues);
+    setUseCustomEditOperationHours(formValues.useCustomOperationHours);
+  }, [detail, editForm, editOpen]);
+
+  const handleCloseCreate = () => {
+    setCreateOpen(false);
+    createForm.resetFields();
+    setCreateFileList([]);
+    setAddressSearching(false);
+    setUseCustomOperationHours(false);
+  };
+
+  const handleOpenCreate = () => {
+    createForm.resetFields();
+    setUseCustomOperationHours(false);
+    createForm.setFieldsValue({
+      useCustomOperationHours: false,
+      commonOpen: '10:00',
+      commonClose: '20:00',
+      operationHours: WEEKDAYS.map(() => ({ open: '10:00', close: '20:00' })),
+      keywords: [],
+      links: [],
+    });
+    setCreateFileList([]);
+    setCreateOpen(true);
+  };
+
+  const handleAddressSearch = async () => {
+    const naverMapKey = import.meta.env.VITE_NAVER_MAP_KEY;
+
+    if (!naverMapKey) {
+      notification.error({
+        message: '주소 검색 설정 필요',
+        description: 'VITE_NAVER_MAP_KEY를 설정해야 주소 좌표를 확정할 수 있습니다.',
+      });
+      return;
+    }
+
+    setAddressSearching(true);
+    try {
+      await loadDaumPostcode();
+      new window.daum.Postcode({
+        oncomplete: async (data) => {
+          setAddressSearching(true);
+          const selectedAddress = data.roadAddress || data.jibunAddress || data.address;
+          if (!selectedAddress) {
+            notification.error({ message: '주소 선택 실패', description: '선택한 주소를 읽을 수 없습니다.' });
+            setAddressSearching(false);
+            return;
+          }
+
+          try {
+            const coordinates = await geocodeAddress(selectedAddress, naverMapKey);
+            createForm.setFieldsValue({
+              address: selectedAddress,
+              addressDetail: '',
+              zip: data.zonecode || '',
+              latitude: coordinates.latitude,
+              longitude: coordinates.longitude,
+            });
+            notification.success({ message: '주소 반영 완료', description: '주소와 좌표가 함께 반영되었습니다.' });
+          } catch (err) {
+            notification.error({
+              message: '좌표 조회 실패',
+              description: err.message || '선택한 주소의 좌표를 찾을 수 없습니다.',
+            });
+          } finally {
+            setAddressSearching(false);
+          }
+        },
+        onclose: () => {
+          setAddressSearching(false);
+        },
+      }).open();
+    } catch (err) {
+      notification.error({
+        message: '주소 검색 실패',
+        description: err.message || '주소 검색 스크립트를 불러오지 못했습니다.',
+      });
+      setAddressSearching(false);
+    }
+  };
+
+  const handleEditAddressSearch = async () => {
+    const naverMapKey = import.meta.env.VITE_NAVER_MAP_KEY;
+
+    if (!naverMapKey) {
+      notification.error({
+        message: '주소 검색 설정 필요',
+        description: 'VITE_NAVER_MAP_KEY를 설정해야 주소 좌표를 확정할 수 있습니다.',
+      });
+      return;
+    }
+
+    setEditAddressSearching(true);
+    try {
+      await loadDaumPostcode();
+      new window.daum.Postcode({
+        oncomplete: async (data) => {
+          setEditAddressSearching(true);
+          const selectedAddress = data.roadAddress || data.jibunAddress || data.address;
+          if (!selectedAddress) {
+            notification.error({ message: '주소 선택 실패', description: '선택한 주소를 읽을 수 없습니다.' });
+            setEditAddressSearching(false);
+            return;
+          }
+
+          try {
+            const coordinates = await geocodeAddress(selectedAddress, naverMapKey);
+            editForm.setFieldsValue({
+              address: selectedAddress,
+              addressDetail: '',
+              zip: data.zonecode || '',
+              latitude: coordinates.latitude,
+              longitude: coordinates.longitude,
+            });
+            notification.success({ message: '주소 반영 완료', description: '주소와 좌표가 함께 반영되었습니다.' });
+          } catch (err) {
+            notification.error({
+              message: '좌표 조회 실패',
+              description: err.message || '선택한 주소의 좌표를 찾을 수 없습니다.',
+            });
+          } finally {
+            setEditAddressSearching(false);
+          }
+        },
+        onclose: () => {
+          setEditAddressSearching(false);
+        },
+      }).open();
+    } catch (err) {
+      notification.error({
+        message: '주소 검색 실패',
+        description: err.message || '주소 검색 스크립트를 불러오지 못했습니다.',
+      });
+      setEditAddressSearching(false);
+    }
+  };
+
+  const handleOperationModeChange = (checked) => {
+    const commonOpen = createForm.getFieldValue('commonOpen') || '10:00';
+    const commonClose = createForm.getFieldValue('commonClose') || '20:00';
+
+    setUseCustomOperationHours(checked);
+    createForm.setFieldsValue({
+      useCustomOperationHours: checked,
+      operationHours: WEEKDAYS.map((_, index) => {
+        const currentValue = createForm.getFieldValue(['operationHours', index]) || {};
+        return {
+          open: currentValue.open || commonOpen,
+          close: currentValue.close || commonClose,
+        };
+      }),
+    });
+  };
+
+  const handleEditOperationModeChange = (checked) => {
+    const commonOpen = editForm.getFieldValue('commonOpen') || '10:00';
+    const commonClose = editForm.getFieldValue('commonClose') || '20:00';
+
+    setUseCustomEditOperationHours(checked);
+    editForm.setFieldsValue({
+      useCustomOperationHours: checked,
+      operationHours: WEEKDAYS.map((_, index) => {
+        const currentValue = editForm.getFieldValue(['operationHours', index]) || {};
+        return {
+          open: currentValue.open || commonOpen,
+          close: currentValue.close || commonClose,
+        };
+      }),
+    });
+  };
+
+  const uploadStoreImages = async () => {
+    const imageUrls = [];
+
+    for (const file of createFileList) {
+      const formData = new FormData();
+      formData.append('image', file.originFileObj);
+
+      const res = await client.post('/shared/upload-image', formData, {
+        params: { imageType: 'STORE' },
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const imageUrl = getUploadedImageUrl(res.data);
+
+      if (!imageUrl) {
+        throw new Error('이미지 업로드 응답에서 URL을 찾을 수 없습니다.');
+      }
+      imageUrls.push(imageUrl);
+    }
+
+    return imageUrls;
+  };
+
+  const handleCreateSubmit = async () => {
     let values;
     try {
-      values = await patchForm.validateFields();
+      values = await createForm.validateFields();
     } catch (err) {
       if (err?.errorFields) return;
       throw err;
     }
 
-    const { latitude, longitude, startDate, finishDate } = values;
-    const hasLat = latitude !== undefined && latitude !== null;
-    const hasLon = longitude !== undefined && longitude !== null;
-    if (hasLat !== hasLon) {
+    if (createFileList.length < 1 || createFileList.length > 5) {
       notification.error({
-        message: '입력 오류',
-        description: '위도/경도는 둘 다 함께 입력해야 합니다.',
+        message: '이미지 확인 필요',
+        description: '스토어 이미지는 1개 이상 5개 이하로 등록해주세요.',
       });
       return;
     }
 
-    const payload = {};
-    if (hasLat && hasLon) {
-      payload.latitude = latitude;
-      payload.longitude = longitude;
-    }
-    if (startDate) payload.startDate = dayjs(startDate).format('YYYY-MM-DD');
-    if (finishDate) payload.finishDate = dayjs(finishDate).format('YYYY-MM-DD');
-
-    if (Object.keys(payload).length === 0) {
-      notification.warning({
-        message: '변경할 항목이 없습니다',
-        description: '변경하려는 필드를 하나 이상 입력해주세요.',
-      });
-      return;
-    }
-
-    setPatchLoading(true);
+    setCreating(true);
     try {
-      await client.patch(`/admin/store/${detail.storeId}`, payload);
-      notification.success({
-        message: '수정 완료',
-        description: '스토어 정보가 수정되었습니다.',
-      });
-      setPatchOpen(false);
-      patchForm.resetFields();
+      const imageUrls = await uploadStoreImages();
+      await client.post(STORE_CREATE_ENDPOINT, buildStoreCreateRequest(values, imageUrls));
+      notification.success({ message: '스토어 추가 완료', description: '새 스토어가 등록되었습니다.' });
+      handleCloseCreate();
+      fetchData({ status: statusFilter, search: searchKeyword });
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || '스토어 추가 실패';
+      notification.error({ message: '추가 실패', description: msg });
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleEditSubmit = async () => {
+    if (!detail) return;
+
+    let values;
+    try {
+      values = await editForm.validateFields();
+    } catch (err) {
+      if (err?.errorFields) return;
+      throw err;
+    }
+
+    setEditSaving(true);
+    try {
+      await client.patch(`/admin/store/${detail.storeId}`, buildStoreEditRequest(values));
+      notification.success({ message: '수정 완료', description: '스토어 정보가 수정되었습니다.' });
+      handleCloseEdit();
 
       try {
         const res = await client.get(`/admin/store/${detail.storeId}`);
         setDetail(res.data);
       } catch {
-        // detail 재조회 실패는 무시 (목록만 갱신)
+        // 상세 재조회 실패는 목록 갱신으로 보완
       }
+
+      fetchData({ status: statusFilter, search: searchKeyword });
     } catch (err) {
       const msg = err.response?.data?.message || err.message || '스토어 수정 실패';
       notification.error({ message: '수정 실패', description: msg });
     } finally {
-      setPatchLoading(false);
+      setEditSaving(false);
     }
   };
 
@@ -431,6 +912,9 @@ export default function Stores() {
       <Header>
         <Typography.Title level={4} style={{ margin: 0 }}>스토어</Typography.Title>
         <Space wrap>
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate}>
+            스토어 추가
+          </Button>
           <Select
             placeholder="승인 상태"
             allowClear
@@ -556,7 +1040,7 @@ export default function Stores() {
                   ? detail.links.map((item, index) => (
                     <div key={`${item.link}-${index}`}>
                       <a href={item.link} target="_blank" rel="noreferrer">
-                        {item.title || item.link}
+                        {LINK_TYPE_LABEL_MAP[item.type] || item.title || item.type || item.link}
                       </a>
                     </div>
                   ))
@@ -581,63 +1065,454 @@ export default function Stores() {
         )}
       </Modal>
       <Modal
-        title="스토어 직접 수정"
-        open={patchOpen}
-        onCancel={() => {
-          setPatchOpen(false);
-          patchForm.resetFields();
-        }}
-        onOk={handlePatchSubmit}
-        confirmLoading={patchLoading}
-        okText="수정"
+        title="스토어 정보 수정"
+        open={editOpen}
+        onCancel={handleCloseEdit}
+        onOk={handleEditSubmit}
+        confirmLoading={editSaving}
+        okText="저장"
         cancelText="취소"
-        destroyOnClose
+        width={900}
       >
         <Alert
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
-          message="빈 칸은 변경하지 않음"
-          description="좌표는 위도/경도를 함께 입력해야 합니다. 승인 상태는 본 화면에서 변경할 수 없으며, 상세 화면의 승인/거절 버튼을 사용해주세요."
+          message="요청 없이 바로 반영"
+          description="스토어 신고/수정 요청과 무관하게 현재 스토어 정보를 직접 수정합니다. 좌표는 주소 검색으로 함께 갱신됩니다."
         />
-        <Form form={patchForm} layout="vertical" preserve={false}>
-          <Form.Item label="좌표" style={{ marginBottom: 0 }}>
-            <Space.Compact style={{ width: '100%' }}>
-              <Form.Item
-                name="latitude"
-                noStyle
-                rules={[
-                  { type: 'number', min: -90, max: 90, message: '-90 ~ 90 범위' },
-                ]}
-              >
-                <InputNumber
-                  placeholder="위도 (latitude)"
-                  step={0.000001}
-                  style={{ width: '50%' }}
+        <StoreForm form={editForm} layout="vertical">
+          <Typography.Title className="store-form-section-title" level={5}>기본 정보</Typography.Title>
+          <Form.Item
+            label="제목"
+            name="title"
+            rules={[
+              { required: true, message: '제목을 입력해주세요.' },
+              { max: 50, message: '제목은 50자 이하로 입력해주세요.' },
+            ]}
+          >
+            <Input maxLength={50} showCount />
+          </Form.Item>
+          <Form.Item
+            label="설명"
+            name="description"
+            rules={[
+              { required: true, message: '설명을 입력해주세요.' },
+              { min: 10, message: '설명은 10자 이상 입력해주세요.' },
+              { max: 1000, message: '설명은 1000자 이하로 입력해주세요.' },
+            ]}
+          >
+            <Input.TextArea rows={4} maxLength={1000} showCount />
+          </Form.Item>
+
+          <Typography.Title className="store-form-section-title" level={5}>위치</Typography.Title>
+          <Form.Item
+            label="주소"
+            name="address"
+            rules={[{ required: true, message: '주소 검색으로 주소를 선택해주세요.' }]}
+          >
+            <Input
+              readOnly
+              addonAfter={(
+                <Button type="link" size="small" loading={editAddressSearching} onClick={handleEditAddressSearch}>
+                  주소 검색
+                </Button>
+              )}
+            />
+          </Form.Item>
+          <Form.Item
+            label="상세 주소"
+            name="addressDetail"
+            rules={[{ required: true, message: '상세 주소를 입력해주세요.' }]}
+          >
+            <Input placeholder="예: 2층, 101호, 팝업존 내부" />
+          </Form.Item>
+          <Form.Item
+            label="우편번호"
+            name="zip"
+            rules={[{ required: true, message: '주소 검색으로 우편번호를 입력해주세요.' }]}
+          >
+            <Input readOnly />
+          </Form.Item>
+          <Form.Item name="latitude" hidden rules={[{ required: true, message: '주소 검색으로 좌표를 확정해주세요.' }]}>
+            <Input type="number" />
+          </Form.Item>
+          <Form.Item name="longitude" hidden rules={[{ required: true, message: '주소 검색으로 좌표를 확정해주세요.' }]}>
+            <Input type="number" />
+          </Form.Item>
+          <Form.Item label="전화번호" name="phoneNumber">
+            <Input />
+          </Form.Item>
+
+          <Typography.Title className="store-form-section-title" level={5}>기간 및 운영 시간</Typography.Title>
+          <Form.Item
+            label="기간"
+            name="period"
+            extra="상시 운영이면 비워두세요."
+          >
+            <DatePicker.RangePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
+          </Form.Item>
+          <Form.Item name="useCustomOperationHours" hidden>
+            <Input type="hidden" />
+          </Form.Item>
+          <Form.Item label="운영 시간" required>
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Space wrap align="baseline">
+                <Form.Item
+                  name="commonOpen"
+                  noStyle
+                  rules={[
+                    { required: true, message: '오픈 시간을 입력해주세요.' },
+                    { pattern: TIME_PATTERN, message: 'HH:mm 형식으로 입력해주세요.' },
+                  ]}
+                >
+                  <Input placeholder="10:00" style={{ width: 140 }} />
+                </Form.Item>
+                <Typography.Text>부터</Typography.Text>
+                <Form.Item
+                  name="commonClose"
+                  noStyle
+                  rules={[
+                    { required: true, message: '마감 시간을 입력해주세요.' },
+                    { pattern: TIME_PATTERN, message: 'HH:mm 형식으로 입력해주세요.' },
+                  ]}
+                >
+                  <Input placeholder="20:00" style={{ width: 140 }} />
+                </Form.Item>
+                <Typography.Text>까지</Typography.Text>
+                <Switch
+                  checked={useCustomEditOperationHours}
+                  checkedChildren="요일별"
+                  unCheckedChildren="매일 동일"
+                  onChange={handleEditOperationModeChange}
                 />
-              </Form.Item>
-              <Form.Item
-                name="longitude"
-                noStyle
-                rules={[
-                  { type: 'number', min: -180, max: 180, message: '-180 ~ 180 범위' },
-                ]}
-              >
-                <InputNumber
-                  placeholder="경도 (longitude)"
-                  step={0.000001}
-                  style={{ width: '50%' }}
+              </Space>
+              {useCustomEditOperationHours && (
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  {WEEKDAYS.map((day, index) => (
+                    <Space key={day} wrap align="baseline">
+                      <Typography.Text strong style={{ width: 32 }}>
+                        {day}
+                      </Typography.Text>
+                      <Form.Item
+                        name={['operationHours', index, 'open']}
+                        noStyle
+                        rules={[
+                          { required: true, message: `${day}요일 오픈 시간` },
+                          { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
+                        ]}
+                      >
+                        <Input placeholder="10:00" style={{ width: 140 }} />
+                      </Form.Item>
+                      <Typography.Text>부터</Typography.Text>
+                      <Form.Item
+                        name={['operationHours', index, 'close']}
+                        noStyle
+                        rules={[
+                          { required: true, message: `${day}요일 마감 시간` },
+                          { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
+                        ]}
+                      >
+                        <Input placeholder="20:00" style={{ width: 140 }} />
+                      </Form.Item>
+                      <Typography.Text>까지</Typography.Text>
+                    </Space>
+                  ))}
+                </Space>
+              )}
+            </Space>
+          </Form.Item>
+
+          <Typography.Title className="store-form-section-title" level={5}>링크</Typography.Title>
+          <Form.List name="links">
+            {(fields, { add, remove }) => (
+              <Space direction="vertical" style={{ width: '100%' }}>
+                {fields.map(({ key, name, ...restField }) => (
+                  <Space key={key} className="store-link-row">
+                    <Form.Item
+                      {...restField}
+                      name={[name, 'type']}
+                      rules={[{ required: true, message: '링크 유형 선택' }]}
+                    >
+                      <Select
+                        placeholder="링크 유형"
+                        options={LINK_TYPE_OPTIONS}
+                        style={{ width: 180 }}
+                      />
+                    </Form.Item>
+                    <Form.Item
+                      {...restField}
+                      name={[name, 'link']}
+                      rules={[
+                        { required: true, message: 'URL 입력' },
+                        { type: 'url', message: '올바른 URL을 입력해주세요.' },
+                      ]}
+                    >
+                      <Input placeholder="https://example.com" style={{ width: 360 }} />
+                    </Form.Item>
+                    <Button danger type="link" onClick={() => remove(name)}>
+                      삭제
+                    </Button>
+                  </Space>
+                ))}
+                <Button onClick={() => add({ type: '', link: '' })}>
+                  링크 추가
+                </Button>
+              </Space>
+            )}
+          </Form.List>
+        </StoreForm>
+      </Modal>
+      <Modal
+        title="스토어 추가"
+        open={createOpen}
+        onCancel={handleCloseCreate}
+        onOk={handleCreateSubmit}
+        confirmLoading={creating}
+        okText="추가"
+        cancelText="취소"
+        width={960}
+        destroyOnClose
+      >
+        <StoreForm form={createForm} layout="vertical" preserve={false}>
+          <Typography.Title className="store-form-section-title" level={5}>기본 정보</Typography.Title>
+          <Form.Item
+            label="제목"
+            name="title"
+            rules={[
+              { required: true, message: '제목을 입력해주세요.' },
+              { max: 50, message: '제목은 50자 이하로 입력해주세요.' },
+            ]}
+          >
+            <Input maxLength={50} showCount />
+          </Form.Item>
+          <Form.Item
+            label="카테고리"
+            name="fandomCategoryIds"
+            rules={[{ required: true, message: '카테고리를 하나 이상 선택해주세요.' }]}
+          >
+            <Select
+              mode="multiple"
+              placeholder="카테고리 선택"
+              options={categories.map((category) => ({
+                value: category.fandomCategoryId,
+                label: category.displayName,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item
+            label="설명"
+            name="description"
+            rules={[
+              { required: true, message: '설명을 입력해주세요.' },
+              { min: 10, message: '설명은 10자 이상 입력해주세요.' },
+              { max: 1000, message: '설명은 1000자 이하로 입력해주세요.' },
+            ]}
+          >
+            <Input.TextArea rows={4} maxLength={1000} showCount />
+          </Form.Item>
+          <Form.Item label="키워드">
+            <Form.List name="keywords">
+              {(fields, { add, remove }) => (
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  {fields.map(({ key, name, ...restField }) => (
+                    <Space key={key} align="baseline">
+                      <Form.Item
+                        {...restField}
+                        name={name}
+                        rules={[{ whitespace: true, message: '빈 키워드는 등록할 수 없습니다.' }]}
+                      >
+                        <Input placeholder="키워드" style={{ width: 240 }} />
+                      </Form.Item>
+                      <Button danger type="link" onClick={() => remove(name)}>
+                        삭제
+                      </Button>
+                    </Space>
+                  ))}
+                  <Button disabled={fields.length >= 5} onClick={() => add('')}>
+                    키워드 추가
+                  </Button>
+                </Space>
+              )}
+            </Form.List>
+          </Form.Item>
+          <Form.Item
+            label="이미지"
+            required
+            extra="스토어 이미지는 1개 이상 5개 이하로 업로드합니다."
+          >
+            <Upload
+              accept="image/*"
+              maxCount={5}
+              multiple
+              fileList={createFileList}
+              beforeUpload={() => false}
+              onChange={({ fileList }) => setCreateFileList(fileList.slice(-5))}
+              listType="picture"
+            >
+              {createFileList.length < 5 && (
+                <Button icon={<UploadOutlined />}>이미지 선택</Button>
+              )}
+            </Upload>
+          </Form.Item>
+
+          <Typography.Title className="store-form-section-title" level={5}>위치</Typography.Title>
+          <Form.Item
+            label="주소"
+            name="address"
+            rules={[{ required: true, message: '주소 검색으로 주소를 선택해주세요.' }]}
+          >
+            <Input
+              readOnly
+              addonAfter={(
+                <Button type="link" size="small" loading={addressSearching} onClick={handleAddressSearch}>
+                  주소 검색
+                </Button>
+              )}
+            />
+          </Form.Item>
+          <Form.Item
+            label="상세 주소"
+            name="addressDetail"
+            rules={[{ required: true, message: '상세 주소를 입력해주세요.' }]}
+          >
+            <Input placeholder="예: 2층, 101호, 팝업존 내부" />
+          </Form.Item>
+          <Form.Item
+            label="우편번호"
+            name="zip"
+            rules={[{ required: true, message: '주소 검색으로 우편번호를 입력해주세요.' }]}
+          >
+            <Input readOnly />
+          </Form.Item>
+          <Form.Item name="latitude" hidden rules={[{ required: true, message: '주소 검색으로 좌표를 확정해주세요.' }]}>
+            <Input type="number" />
+          </Form.Item>
+          <Form.Item name="longitude" hidden rules={[{ required: true, message: '주소 검색으로 좌표를 확정해주세요.' }]}>
+            <Input type="number" />
+          </Form.Item>
+          <Form.Item label="전화번호" name="phoneNumber">
+            <Input />
+          </Form.Item>
+
+          <Typography.Title className="store-form-section-title" level={5}>기간 및 운영 시간</Typography.Title>
+          <Form.Item
+            label="기간"
+            name="period"
+            extra="상시 운영이면 비워두세요."
+          >
+            <DatePicker.RangePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
+          </Form.Item>
+          <Form.Item name="useCustomOperationHours" hidden>
+            <Input type="hidden" />
+          </Form.Item>
+          <Form.Item label="운영 시간" required>
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Space wrap align="baseline">
+                <Form.Item
+                  name="commonOpen"
+                  noStyle
+                  rules={[
+                    { required: true, message: '오픈 시간을 입력해주세요.' },
+                    { pattern: TIME_PATTERN, message: 'HH:mm 형식으로 입력해주세요.' },
+                  ]}
+                >
+                  <Input placeholder="10:00" style={{ width: 140 }} />
+                </Form.Item>
+                <Typography.Text>부터</Typography.Text>
+                <Form.Item
+                  name="commonClose"
+                  noStyle
+                  rules={[
+                    { required: true, message: '마감 시간을 입력해주세요.' },
+                    { pattern: TIME_PATTERN, message: 'HH:mm 형식으로 입력해주세요.' },
+                  ]}
+                >
+                  <Input placeholder="20:00" style={{ width: 140 }} />
+                </Form.Item>
+                <Typography.Text>까지</Typography.Text>
+                <Switch
+                  checked={useCustomOperationHours}
+                  checkedChildren="요일별"
+                  unCheckedChildren="매일 동일"
+                  onChange={handleOperationModeChange}
                 />
-              </Form.Item>
-            </Space.Compact>
+              </Space>
+              {useCustomOperationHours && (
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  {WEEKDAYS.map((day, index) => (
+                    <Space key={day} wrap align="baseline">
+                      <Typography.Text strong style={{ width: 32 }}>
+                        {day}
+                      </Typography.Text>
+                      <Form.Item
+                        name={['operationHours', index, 'open']}
+                        noStyle
+                        rules={[
+                          { required: true, message: `${day}요일 오픈 시간` },
+                          { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
+                        ]}
+                      >
+                        <Input placeholder="10:00" style={{ width: 140 }} />
+                      </Form.Item>
+                      <Typography.Text>부터</Typography.Text>
+                      <Form.Item
+                        name={['operationHours', index, 'close']}
+                        noStyle
+                        rules={[
+                          { required: true, message: `${day}요일 마감 시간` },
+                          { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
+                        ]}
+                      >
+                        <Input placeholder="20:00" style={{ width: 140 }} />
+                      </Form.Item>
+                      <Typography.Text>까지</Typography.Text>
+                    </Space>
+                  ))}
+                </Space>
+              )}
+            </Space>
           </Form.Item>
-          <Form.Item name="startDate" label="시작일">
-            <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
-          </Form.Item>
-          <Form.Item name="finishDate" label="종료일">
-            <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
-          </Form.Item>
-        </Form>
+
+          <Typography.Title className="store-form-section-title" level={5}>링크</Typography.Title>
+          <Form.List name="links">
+            {(fields, { add, remove }) => (
+              <Space direction="vertical" style={{ width: '100%' }}>
+                {fields.map(({ key, name, ...restField }) => (
+                  <Space key={key} className="store-link-row">
+                    <Form.Item
+                      {...restField}
+                      name={[name, 'type']}
+                      rules={[{ required: true, message: '링크 유형 선택' }]}
+                    >
+                      <Select
+                        placeholder="링크 유형"
+                        options={LINK_TYPE_OPTIONS}
+                        style={{ width: 180 }}
+                      />
+                    </Form.Item>
+                    <Form.Item
+                      {...restField}
+                      name={[name, 'link']}
+                      rules={[
+                        { required: true, message: 'URL 입력' },
+                        { type: 'url', message: '올바른 URL을 입력해주세요.' },
+                      ]}
+                    >
+                      <Input placeholder="https://example.com" style={{ width: 360 }} />
+                    </Form.Item>
+                    <Button danger type="link" onClick={() => remove(name)}>
+                      삭제
+                    </Button>
+                  </Space>
+                ))}
+                <Button onClick={() => add({ type: '', link: '' })}>
+                  링크 추가
+                </Button>
+              </Space>
+            )}
+          </Form.List>
+        </StoreForm>
       </Modal>
     </div>
   );
