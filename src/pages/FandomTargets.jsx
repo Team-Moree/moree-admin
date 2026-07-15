@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Table, Tag, Input, Avatar, Typography, Result, Button, App,
   Select, Space, Modal, Form, Descriptions, Checkbox,
@@ -45,6 +45,7 @@ export default function FandomTargets() {
   const [editTarget, setEditTarget] = useState(null);
   const [editName, setEditName] = useState('');
   const [editImageUrl, setEditImageUrl] = useState('');
+  const [editSource, setEditSource] = useState('');
   const [editStatus, setEditStatus] = useState(null);
   const [editCategoryIds, setEditCategoryIds] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -64,16 +65,30 @@ export default function FandomTargets() {
     }
   };
 
-  const fetchData = useCallback(async (keyword = '', status = undefined) => {
+  // 커서 페이지네이션으로 전체 목록을 끝까지 조회한다.
+  // (어드민 조회 API는 next 커서만 지원하고 search 파라미터는 서버에서 무시하므로,
+  //  이름 검색은 전체 조회 후 클라이언트에서 필터링한다.)
+  const fetchData = useCallback(async (status = undefined) => {
     setLoading(true);
     setError(null);
     try {
-      const params = { next: '', size: 100 };
-      if (keyword) params.search = keyword;
-      if (status) params.status = status;
-      const res = await client.get('/admin/fandom-target', { params });
-      const list = Array.isArray(res.data?.results) ? res.data.results : Array.isArray(res.data) ? res.data : [];
-      setData(list);
+      const PAGE_SIZE = 100;
+      const MAX_PAGES = 1000; // 무한루프 방지 안전장치 (최대 10만 건)
+      const all = [];
+      let next = '';
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const params = { next, size: PAGE_SIZE };
+        if (status) params.status = status;
+        const res = await client.get('/admin/fandom-target', { params });
+        const list = Array.isArray(res.data?.results)
+          ? res.data.results
+          : Array.isArray(res.data) ? res.data : [];
+        all.push(...list);
+        const nextCursor = res.data?.next;
+        if (!nextCursor || list.length === 0) break;
+        next = nextCursor;
+      }
+      setData(all);
     } catch (err) {
       const msg = err.response?.data?.message || err.message || '덕질 대상 조회 실패';
       setError(msg);
@@ -88,20 +103,23 @@ export default function FandomTargets() {
     fetchCategories();
   }, []);
 
-  const handleSearch = (value) => {
-    setSearch(value);
-    fetchData(value, statusFilter);
-  };
-
   const handleStatusFilter = (value) => {
     setStatusFilter(value);
-    fetchData(search, value);
+    fetchData(value);
   };
+
+  // 이름 검색은 전체 조회된 데이터에 대해 클라이언트에서 필터링
+  const filteredData = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    if (!keyword) return data;
+    return data.filter((item) => (item.name || '').toLowerCase().includes(keyword));
+  }, [data, search]);
 
   const openEditModal = (record) => {
     setEditTarget(record);
     setEditName(record.name || '');
     setEditImageUrl(record.imageUrl || '');
+    setEditSource(record.source || '');
     setEditStatus(record.status);
     setEditCategoryIds(record.fandomCategories?.map((c) => c.fandomCategoryId) || []);
   };
@@ -114,6 +132,7 @@ export default function FandomTargets() {
       const patchBody = {};
       if (editName !== editTarget.name) patchBody.name = editName;
       if (editImageUrl !== (editTarget.imageUrl || '')) patchBody.imageUrl = editImageUrl;
+      if (editSource !== (editTarget.source || '')) patchBody.source = editSource;
       if (editStatus !== editTarget.status) patchBody.status = editStatus;
 
       if (Object.keys(patchBody).length > 0) {
@@ -130,7 +149,7 @@ export default function FandomTargets() {
       }
       notification.success({ message: '수정 완료', description: '덕질 대상이 수정되었습니다.' });
       setEditTarget(null);
-      fetchData(search, statusFilter);
+      fetchData(statusFilter);
     } catch (err) {
       const msg = err.response?.data?.message || err.message || '수정 실패';
       notification.error({ message: '수정 실패', description: msg });
@@ -170,6 +189,24 @@ export default function FandomTargets() {
         )),
     },
     {
+      title: '소스',
+      dataIndex: 'source',
+      key: 'source',
+      width: 220,
+      ellipsis: true,
+      render: (src) => {
+        if (!src) return <Typography.Text type="secondary">-</Typography.Text>;
+        const isUrl = /^https?:\/\//i.test(src);
+        return isUrl ? (
+          <Typography.Link href={src} target="_blank" rel="noreferrer" ellipsis>
+            {src}
+          </Typography.Link>
+        ) : (
+          <Typography.Text ellipsis={{ tooltip: src }}>{src}</Typography.Text>
+        );
+      },
+    },
+    {
       title: '상태',
       dataIndex: 'status',
       key: 'status',
@@ -205,7 +242,7 @@ export default function FandomTargets() {
           status="warning"
           title="데이터를 불러올 수 없습니다"
           subTitle={error}
-          extra={<Button type="primary" onClick={() => fetchData()}>다시 시도</Button>}
+          extra={<Button type="primary" onClick={() => fetchData(statusFilter)}>다시 시도</Button>}
         />
       </div>
     );
@@ -233,7 +270,7 @@ export default function FandomTargets() {
             prefix={<SearchOutlined />}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            onSearch={handleSearch}
+            onSearch={setSearch}
             style={{ width: 300 }}
             allowClear
           />
@@ -242,7 +279,7 @@ export default function FandomTargets() {
 
       <Table
         columns={columns}
-        dataSource={data}
+        dataSource={filteredData}
         rowKey="fandomTargetId"
         loading={loading}
         pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `총 ${t}건` }}
@@ -286,6 +323,16 @@ export default function FandomTargets() {
                   value={editImageUrl}
                   onChange={(e) => setEditImageUrl(e.target.value)}
                   placeholder="https://..."
+                />
+              </Form.Item>
+              <Form.Item label="소스">
+                <Input.TextArea
+                  value={editSource}
+                  onChange={(e) => setEditSource(e.target.value)}
+                  placeholder="출처(원작/URL 등)"
+                  maxLength={500}
+                  showCount
+                  autoSize={{ minRows: 1, maxRows: 4 }}
                 />
               </Form.Item>
               <Form.Item label="상태">
