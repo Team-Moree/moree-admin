@@ -98,7 +98,7 @@ const CATEGORY_COLORS = {
 
 const PAGE_SIZE = 50;
 const ALL_STATUS = 'ALL';
-const STORE_CREATE_ENDPOINT = '/store';
+const STORE_CREATE_ENDPOINT = '/admin/store';
 const DAUM_POSTCODE_SCRIPT_URL = 'https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
 const NAVER_MAPS_SERVICE_WAIT_MS = 5000;
 const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
@@ -270,6 +270,7 @@ const buildStoreCreateRequest = (values, imageUrls) => {
         type: normalizeText(item.type),
         link: normalizeText(item.link),
       })),
+    hasGacha: !!values.hasGacha,
   };
 
   if (values.period?.[0] && values.period?.[1]) {
@@ -300,6 +301,7 @@ const buildStoreEditRequest = (values) => ({
       type: normalizeText(item.type),
       link: normalizeText(item.link),
     })),
+  hasGacha: !!values.hasGacha,
 });
 
 const getStoreEditFormValues = (store) => {
@@ -319,6 +321,7 @@ const getStoreEditFormValues = (store) => {
     latitude: store?.latitude ?? '',
     longitude: store?.longitude ?? '',
     phoneNumber: store?.phoneNumber || '',
+    hasGacha: !!store?.hasGacha,
     period: store?.startDate && store?.finishDate
       ? [dayjs(store.startDate), dayjs(store.finishDate)]
       : null,
@@ -353,6 +356,7 @@ export default function Stores() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [statusUpdatingId, setStatusUpdatingId] = useState(null);
   const [pendingNextStatus, setPendingNextStatus] = useState(null);
+  const [pendingHasGacha, setPendingHasGacha] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createFileList, setCreateFileList] = useState([]);
@@ -393,7 +397,7 @@ export default function Stores() {
           title="이 스토어를 거절할까요?"
           okText="거절"
           cancelText="취소"
-          onConfirm={() => handleStatusChange(detail.storeId, 'REJECTED')}
+          onConfirm={() => handleStatusChange(detail.storeId, 'REJECTED', !!detail?.hasGacha)}
         >
           <Button danger loading={statusUpdatingId === detail?.storeId}>
             거절
@@ -401,10 +405,24 @@ export default function Stores() {
         </Popconfirm>
         <Popconfirm
           key="approve"
-          title="이 스토어를 승인할까요?"
+          title={(
+            <Space direction="vertical" size={8}>
+              <span>이 스토어를 승인할까요?</span>
+              <Space size={6} onClick={(event) => event.stopPropagation()}>
+                <Typography.Text>아이템 뽑기</Typography.Text>
+                <Switch
+                  size="small"
+                  checked={pendingHasGacha}
+                  onChange={setPendingHasGacha}
+                  checkedChildren="ON"
+                  unCheckedChildren="OFF"
+                />
+              </Space>
+            </Space>
+          )}
           okText="승인"
           cancelText="취소"
-          onConfirm={() => handleStatusChange(detail.storeId, 'APPROVED')}
+          onConfirm={() => handleStatusChange(detail.storeId, 'APPROVED', pendingHasGacha)}
         >
           <Button type="primary" loading={statusUpdatingId === detail?.storeId}>
             승인
@@ -431,7 +449,7 @@ export default function Stores() {
           okText="변경"
           cancelText="취소"
           disabled={!pendingNextStatus}
-          onConfirm={() => handleStatusChange(detail.storeId, pendingNextStatus)}
+          onConfirm={() => handleStatusChange(detail.storeId, pendingNextStatus, !!detail?.hasGacha)}
         >
           <Button
             type="primary"
@@ -513,10 +531,12 @@ export default function Stores() {
   const handleOpenDetail = async (storeId) => {
     setDetail(null);
     setPendingNextStatus(null);
+    setPendingHasGacha(false);
     setDetailLoading(true);
     try {
       const res = await client.get(`/admin/store/${storeId}`);
       setDetail(res.data);
+      setPendingHasGacha(!!res.data?.hasGacha);
     } catch (err) {
       const msg = err.response?.data?.message || err.message || '스토어 상세 조회 실패';
       notification.error({ message: '상세 조회 실패', description: msg });
@@ -565,6 +585,7 @@ export default function Stores() {
       operationHours: WEEKDAYS.map(() => ({ open: '10:00', close: '20:00' })),
       keywords: [],
       links: [],
+      hasGacha: false,
     });
     setCreateFileList([]);
     setCreateOpen(true);
@@ -743,7 +764,13 @@ export default function Stores() {
     try {
       values = await createForm.validateFields();
     } catch (err) {
-      if (err?.errorFields) return;
+      if (err?.errorFields) {
+        notification.error({
+          message: '입력 확인 필요',
+          description: err.errorFields[0]?.errors?.[0] || '필수 항목을 확인해주세요.',
+        });
+        return;
+      }
       throw err;
     }
 
@@ -777,13 +804,19 @@ export default function Stores() {
     try {
       values = await editForm.validateFields();
     } catch (err) {
-      if (err?.errorFields) return;
+      if (err?.errorFields) {
+        notification.error({
+          message: '입력 확인 필요',
+          description: err.errorFields[0]?.errors?.[0] || '필수 항목을 확인해주세요.',
+        });
+        return;
+      }
       throw err;
     }
 
     setEditSaving(true);
     try {
-      await client.patch(`/admin/store/${detail.storeId}`, buildStoreEditRequest(values));
+      await client.put(`/admin/store/${detail.storeId}`, buildStoreEditRequest(values));
       notification.success({ message: '수정 완료', description: '스토어 정보가 수정되었습니다.' });
       handleCloseEdit();
 
@@ -803,10 +836,10 @@ export default function Stores() {
     }
   };
 
-  const handleStatusChange = async (storeId, nextStatus) => {
+  const handleStatusChange = async (storeId, nextStatus, hasGacha) => {
     setStatusUpdatingId(storeId);
     try {
-      await client.post(`/admin/store/${storeId}/status`, { status: nextStatus });
+      await client.post(`/admin/store/${storeId}/status`, { status: nextStatus, hasGacha });
 
       const successLabel = STATUS_MAP[nextStatus]?.label || nextStatus;
       notification.success({
@@ -819,7 +852,7 @@ export default function Stores() {
       )));
 
       setDetail((prev) => (prev && prev.storeId === storeId
-        ? { ...prev, approvalStatus: nextStatus }
+        ? { ...prev, approvalStatus: nextStatus, hasGacha }
         : prev));
 
       setPendingNextStatus(null);
@@ -965,6 +998,7 @@ export default function Stores() {
           setDetail(null);
           setDetailLoading(false);
           setPendingNextStatus(null);
+          setPendingHasGacha(false);
         }}
         footer={modalFooter}
         width={820}
@@ -1103,6 +1137,9 @@ export default function Stores() {
             ]}
           >
             <Input.TextArea rows={4} maxLength={1000} showCount />
+          </Form.Item>
+          <Form.Item label="아이템 뽑기" name="hasGacha" valuePropName="checked">
+            <Switch checkedChildren="ON" unCheckedChildren="OFF" />
           </Form.Item>
 
           <Typography.Title className="store-form-section-title" level={5}>위치</Typography.Title>
@@ -1310,6 +1347,9 @@ export default function Stores() {
             ]}
           >
             <Input.TextArea rows={4} maxLength={1000} showCount />
+          </Form.Item>
+          <Form.Item label="아이템 뽑기" name="hasGacha" valuePropName="checked">
+            <Switch checkedChildren="ON" unCheckedChildren="OFF" />
           </Form.Item>
           <Form.Item label="키워드">
             <Form.List name="keywords">
