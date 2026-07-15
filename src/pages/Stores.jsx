@@ -112,6 +112,7 @@ const LINK_TYPE_OPTIONS = [
   { value: 'OPEN_CHAT', label: '오픈채팅' },
 ];
 const LINK_TYPE_LABEL_MAP = Object.fromEntries(LINK_TYPE_OPTIONS.map((option) => [option.value, option.label]));
+const LINK_TYPE_BY_LABEL = Object.fromEntries(LINK_TYPE_OPTIONS.map((option) => [option.label, option.value]));
 const KEYWORD_TAG_STYLE = {
   marginInlineEnd: 0,
   color: '#44546f',
@@ -298,7 +299,7 @@ const buildStoreEditRequest = (values) => ({
   links: compactList(values.links)
     .filter((item) => item?.type || item?.link)
     .map((item) => ({
-      type: normalizeText(item.type),
+      title: LINK_TYPE_LABEL_MAP[item.type] || normalizeText(item.type),
       link: normalizeText(item.link),
     })),
   hasGacha: !!values.hasGacha,
@@ -334,7 +335,7 @@ const getStoreEditFormValues = (store) => {
     })),
     links: Array.isArray(store?.links)
       ? store.links.map((item) => ({
-        type: item.type || item.title || '',
+        type: item.type || LINK_TYPE_BY_LABEL[item.title] || '',
         link: item.link || '',
       }))
       : [],
