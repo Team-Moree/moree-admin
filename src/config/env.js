@@ -6,8 +6,11 @@
 export const APP_ENV = import.meta.env.VITE_APP_ENV === 'real' ? 'real' : 'beta';
 export const IS_REAL = APP_ENV === 'real';
 
-// 지정되지 않으면 same-origin '/api' 로 폴백 → 로컬은 vite 프록시, 배포는 vercel.json rewrite 사용
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+// 지정되지 않으면 프로필별 same-origin prefix 로 폴백 → 로컬은 vite 프록시, 배포는 vercel.json rewrite 사용
+// - real: '/api'      → vercel.json rewrite → api.moree.app (운영)
+// - beta: '/api-beta' → vercel.json rewrite → dev.api.moree.app (개발)
+// 두 경로 모두 same-origin 이라 CORS 가 필요 없고, 빌드 프로필(VITE_APP_ENV)만으로 대상이 결정된다.
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (IS_REAL ? '/api' : '/api-beta');
 
 const PROFILE = {
   real: {
