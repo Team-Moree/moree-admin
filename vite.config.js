@@ -12,6 +12,13 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       proxy: {
+        // beta 프로필은 baseURL 이 '/api-beta' → 배포의 vercel.json rewrite 와 동일하게
+        // 로컬에서도 프록시 대상으로 전달한다. (더 구체적인 prefix 를 먼저 등록)
+        '/api-beta': {
+          target: proxyTarget,
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api-beta/, ''),
+        },
         '/api': {
           target: proxyTarget,
           changeOrigin: true,

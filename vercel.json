@@ -1,5 +1,6 @@
 {
   "rewrites": [
+    { "source": "/api-beta/:path*", "destination": "https://dev.api.moree.app/:path*" },
     { "source": "/api/:path*", "destination": "https://api.moree.app/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
