@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Image, Spin, Popconfirm, Alert, Input, Form, DatePicker, Upload, Switch } from 'antd';
+import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Image, Spin, Popconfirm, Alert, Input, Form, DatePicker, Upload, Switch, Segmented } from 'antd';
 import { CloseOutlined, EditOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import dayjs from 'dayjs';
@@ -211,6 +211,8 @@ const STORE_CREATE_ENDPOINT = '/admin/store';
 const DAUM_POSTCODE_SCRIPT_URL = 'https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
 const NAVER_MAPS_SERVICE_WAIT_MS = 5000;
 const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
+const KOREAN_WEEKDAYS_BY_DAY_INDEX = ['일', '월', '화', '수', '목', '금', '토'];
+const dateToKoreanWeekday = (date) => KOREAN_WEEKDAYS_BY_DAY_INDEX[dayjs(date).day()];
 const TIME_PATTERN = /^([01][0-9]|2[0-4]):[0-5][0-9]$/;
 const LINK_TYPE_OPTIONS = [
   { value: 'HOMEPAGE', label: '홈페이지' },
@@ -347,6 +349,16 @@ const getUploadedImageUrl = (data) => (
 );
 
 const buildOperationHours = (values) => {
+  if (values.useDateOperationHours) {
+    return compactList(values.operationDates)
+      .filter((item) => item?.date && item?.open && item?.close)
+      .map((item) => ({
+        day: dateToKoreanWeekday(item.date),
+        open: normalizeText(item.open),
+        close: normalizeText(item.close),
+      }));
+  }
+
   if (values.useCustomOperationHours) {
     return WEEKDAYS
       .map((day, index) => ({
@@ -504,6 +516,7 @@ export default function Stores() {
   const [addressSearching, setAddressSearching] = useState(false);
   const [useCustomOperationHours, setUseCustomOperationHours] = useState(false);
   const [createExcludedOperationDays, setCreateExcludedOperationDays] = useState([]);
+  const [createOperationMode, setCreateOperationMode] = useState('common');
   const [editOpen, setEditOpen] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editAddressSearching, setEditAddressSearching] = useState(false);
@@ -724,17 +737,21 @@ export default function Stores() {
     setAddressSearching(false);
     setUseCustomOperationHours(false);
     setCreateExcludedOperationDays([]);
+    setCreateOperationMode('common');
   };
 
   const handleOpenCreate = () => {
     createForm.resetFields();
     setUseCustomOperationHours(false);
     setCreateExcludedOperationDays([]);
+    setCreateOperationMode('common');
     createForm.setFieldsValue({
       useCustomOperationHours: false,
+      useDateOperationHours: false,
       commonOpen: '10:00',
       commonClose: '20:00',
       operationHours: WEEKDAYS.map(() => ({ isActive: true, open: '10:00', close: '20:00' })),
+      operationDates: [],
       hasGacha: false,
       keywords: [],
       links: [],
@@ -871,6 +888,17 @@ export default function Stores() {
           close: currentValue.close || commonClose,
         };
       }),
+    });
+  };
+
+  const handleCreateOperationModeChange = (mode) => {
+    setCreateOperationMode(mode);
+    handleOperationModeChange(mode === 'weekday');
+    createForm.setFieldsValue({
+      useDateOperationHours: mode === 'date',
+      operationDates: mode === 'date' && !createForm.getFieldValue('operationDates')?.length
+        ? [{ date: null, open: '10:00', close: '20:00' }]
+        : createForm.getFieldValue('operationDates'),
     });
   };
 
@@ -1403,6 +1431,7 @@ export default function Stores() {
             label="카테고리"
             name="fandomCategoryIds"
             rules={[{ required: true, message: '카테고리를 하나 이상 선택해주세요.' }]}
+            extra={<Typography.Text type="secondary" style={{ fontSize: 12 }}>처음 선택한 카테고리가 대표 카테고리로 지정됩니다.</Typography.Text>}
           >
             <Select
               mode="multiple"
@@ -1706,6 +1735,7 @@ export default function Stores() {
             label="카테고리"
             name="fandomCategoryIds"
             rules={[{ required: true, message: '카테고리를 하나 이상 선택해주세요.' }]}
+            extra={<Typography.Text type="secondary" style={{ fontSize: 12 }}>처음 선택한 카테고리가 대표 카테고리로 지정됩니다.</Typography.Text>}
           >
             <Select
               mode="multiple"
@@ -1826,37 +1856,45 @@ export default function Stores() {
           </Form.Item>
           <Form.Item label="운영 시간" required>
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              <Space wrap align="baseline">
-                <Form.Item
-                  name="commonOpen"
-                  noStyle
-                  rules={[
-                    { required: true, message: '오픈 시간을 입력해주세요.' },
-                    { pattern: TIME_PATTERN, message: 'HH:mm 형식으로 입력해주세요.' },
-                  ]}
-                >
-                  <Input placeholder="10:00" style={{ width: 140 }} />
-                </Form.Item>
-                <Typography.Text>부터</Typography.Text>
-                <Form.Item
-                  name="commonClose"
-                  noStyle
-                  rules={[
-                    { required: true, message: '마감 시간을 입력해주세요.' },
-                    { pattern: TIME_PATTERN, message: 'HH:mm 형식으로 입력해주세요.' },
-                  ]}
-                >
-                  <Input placeholder="20:00" style={{ width: 140 }} />
-                </Form.Item>
-                <Typography.Text>까지</Typography.Text>
-                <Switch
-                  checked={useCustomOperationHours}
-                  checkedChildren="요일별"
-                  unCheckedChildren="매일 동일"
-                  onChange={handleOperationModeChange}
-                />
-              </Space>
-              {useCustomOperationHours && (
+              <Form.Item name="useDateOperationHours" hidden>
+                <Input type="hidden" />
+              </Form.Item>
+              <Segmented
+                value={createOperationMode}
+                onChange={handleCreateOperationModeChange}
+                options={[
+                  { label: '매일 동일', value: 'common' },
+                  { label: '요일별', value: 'weekday' },
+                  { label: '날짜 지정', value: 'date' },
+                ]}
+              />
+              {createOperationMode === 'common' && (
+                <Space wrap align="baseline">
+                  <Form.Item
+                    name="commonOpen"
+                    noStyle
+                    rules={[
+                      { required: true, message: '오픈 시간을 입력해주세요.' },
+                      { pattern: TIME_PATTERN, message: 'HH:mm 형식으로 입력해주세요.' },
+                    ]}
+                  >
+                    <Input placeholder="10:00" style={{ width: 140 }} />
+                  </Form.Item>
+                  <Typography.Text>부터</Typography.Text>
+                  <Form.Item
+                    name="commonClose"
+                    noStyle
+                    rules={[
+                      { required: true, message: '마감 시간을 입력해주세요.' },
+                      { pattern: TIME_PATTERN, message: 'HH:mm 형식으로 입력해주세요.' },
+                    ]}
+                  >
+                    <Input placeholder="20:00" style={{ width: 140 }} />
+                  </Form.Item>
+                  <Typography.Text>까지</Typography.Text>
+                </Space>
+              )}
+              {createOperationMode === 'weekday' && (
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
                   <Form.Item noStyle shouldUpdate>
                     {({ getFieldValue }) => {
@@ -1937,6 +1975,89 @@ export default function Stores() {
                       );
                     }}
                   </Form.Item>
+                </Space>
+              )}
+              {createOperationMode === 'date' && (
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    선택한 날짜의 요일 기준으로 자동 변환되어 저장됩니다.
+                  </Typography.Text>
+                  <Form.List name="operationDates">
+                    {(fields, { add, remove }) => (
+                      <Form.Item noStyle shouldUpdate>
+                        {({ getFieldValue }) => {
+                          const operationDates = getFieldValue('operationDates') || [];
+                          const weekdayByRow = operationDates.map((item) => (
+                            item?.date ? dateToKoreanWeekday(item.date) : null
+                          ));
+                          const period = getFieldValue('period') || [];
+                          const [periodStart, periodFinish] = period;
+
+                          return (
+                            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                              {fields.map(({ key, name, ...restField }) => {
+                                const usedWeekdays = new Set(
+                                  weekdayByRow.filter((_, index) => index !== name),
+                                );
+
+                                return (
+                                  <Space key={key} wrap align="baseline">
+                                    <Form.Item
+                                      {...restField}
+                                      name={[name, 'date']}
+                                      noStyle
+                                      rules={[{ required: true, message: '날짜를 선택해주세요.' }]}
+                                    >
+                                      <DatePicker
+                                        format="YYYY-MM-DD"
+                                        placeholder="날짜 선택"
+                                        style={{ width: 160 }}
+                                        disabledDate={(current) => (
+                                          usedWeekdays.has(dateToKoreanWeekday(current))
+                                          || (periodStart && current.isBefore(periodStart, 'day'))
+                                          || (periodFinish && current.isAfter(periodFinish, 'day'))
+                                        )}
+                                      />
+                                    </Form.Item>
+                                    <Form.Item
+                                      {...restField}
+                                      name={[name, 'open']}
+                                      noStyle
+                                      rules={[
+                                        { required: true, message: '오픈 시간을 입력해주세요.' },
+                                        { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
+                                      ]}
+                                    >
+                                      <Input placeholder="10:00" style={{ width: 140 }} />
+                                    </Form.Item>
+                                    <Typography.Text>부터</Typography.Text>
+                                    <Form.Item
+                                      {...restField}
+                                      name={[name, 'close']}
+                                      noStyle
+                                      rules={[
+                                        { required: true, message: '마감 시간을 입력해주세요.' },
+                                        { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
+                                      ]}
+                                    >
+                                      <Input placeholder="20:00" style={{ width: 140 }} />
+                                    </Form.Item>
+                                    <Typography.Text>까지</Typography.Text>
+                                    <Button danger type="link" onClick={() => remove(name)}>
+                                      삭제
+                                    </Button>
+                                  </Space>
+                                );
+                              })}
+                              <Button onClick={() => add({ date: null, open: '10:00', close: '20:00' })}>
+                                날짜 추가
+                              </Button>
+                            </Space>
+                          );
+                        }}
+                      </Form.Item>
+                    )}
+                  </Form.List>
                 </Space>
               )}
             </Space>

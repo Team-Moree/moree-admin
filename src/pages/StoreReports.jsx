@@ -556,6 +556,7 @@ export default function StoreReports() {
             label="카테고리"
             name="fandomCategoryIds"
             rules={[{ required: true, message: '카테고리를 하나 이상 선택해주세요.' }]}
+            extra={<Typography.Text type="secondary" style={{ fontSize: 12 }}>처음 선택한 카테고리가 대표 카테고리로 지정됩니다.</Typography.Text>}
           >
             <Select
               mode="multiple"
