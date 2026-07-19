@@ -184,6 +184,9 @@ const geocodeAddress = async (address, clientId) => {
 
 const buildStoreFormValues = (store) => ({
   title: store?.title || '',
+  fandomCategoryIds: Array.isArray(store?.fandomCategories)
+    ? store.fandomCategories.map((item) => item.fandomCategoryId)
+    : [],
   description: store?.description || '',
   address: store?.address || '',
   addressDetail: store?.addressDetail || '',
@@ -193,6 +196,7 @@ const buildStoreFormValues = (store) => ({
   phoneNumber: store?.phoneNumber || '',
   startDate: toDateInputValue(store?.startDate),
   finishDate: toDateInputValue(store?.finishDate),
+  keywords: Array.isArray(store?.keywords) ? store.keywords : [],
   operationHours: Array.isArray(store?.operationHours)
     ? store.operationHours.map((item) => ({
       day: item.day || '',
@@ -222,7 +226,23 @@ export default function StoreReports() {
   const [storeDetailLoaded, setStoreDetailLoaded] = useState(false);
   const [processingKey, setProcessingKey] = useState(null);
   const [addressSearching, setAddressSearching] = useState(false);
+  const [categories, setCategories] = useState([]);
   const { notification } = App.useApp();
+
+  const fetchCategories = useCallback(async () => {
+    try {
+      const res = await client.get('/shared/fandom-category');
+      const list = Array.isArray(res.data?.results) ? res.data.results : Array.isArray(res.data) ? res.data : [];
+      setCategories(list);
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || '팬덤 카테고리 조회 실패';
+      notification.error({ message: '카테고리 조회 실패', description: msg });
+    }
+  }, [notification]);
+
+  useEffect(() => {
+    fetchCategories();
+  }, [fetchCategories]);
 
   const fetchData = useCallback(async ({
     cursor = '',
@@ -532,8 +552,47 @@ export default function StoreReports() {
           <Form.Item label="제목" name="title">
             <Input />
           </Form.Item>
+          <Form.Item
+            label="카테고리"
+            name="fandomCategoryIds"
+            rules={[{ required: true, message: '카테고리를 하나 이상 선택해주세요.' }]}
+          >
+            <Select
+              mode="multiple"
+              placeholder="카테고리 선택"
+              options={categories.map((category) => ({
+                value: category.fandomCategoryId,
+                label: category.displayName,
+              }))}
+            />
+          </Form.Item>
           <Form.Item label="설명" name="description">
             <Input.TextArea rows={3} />
+          </Form.Item>
+          <Form.Item label="키워드">
+            <Form.List name="keywords">
+              {(fields, { add, remove }) => (
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  {fields.map(({ key, name, ...restField }) => (
+                    <Space key={key} align="baseline">
+                      <Form.Item
+                        {...restField}
+                        name={name}
+                        rules={[{ whitespace: true, message: '빈 키워드는 등록할 수 없습니다.' }]}
+                      >
+                        <Input placeholder="키워드" style={{ width: 240 }} />
+                      </Form.Item>
+                      <Button danger type="link" onClick={() => remove(name)}>
+                        삭제
+                      </Button>
+                    </Space>
+                  ))}
+                  <Button disabled={fields.length >= 5} onClick={() => add('')}>
+                    키워드 추가
+                  </Button>
+                </Space>
+              )}
+            </Form.List>
           </Form.Item>
           <Form.Item label="주소" name="address">
             <Input

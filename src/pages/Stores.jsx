@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Descriptions, Image, Spin, Popconfirm, Alert, Input, Form, DatePicker, Upload, Switch } from 'antd';
-import { EditOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
+import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Image, Spin, Popconfirm, Alert, Input, Form, DatePicker, Upload, Switch } from 'antd';
+import { CloseOutlined, EditOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import dayjs from 'dayjs';
 import client from '../api/client';
@@ -67,6 +67,116 @@ const StoreForm = styled(Form)`
   }
 `;
 
+const DetailView = styled.div`
+  .store-detail-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 8px;
+  }
+
+  .store-detail-title {
+    margin: 0 0 8px;
+    color: rgba(0, 0, 0, 0.88);
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.45;
+  }
+
+  .store-detail-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: rgba(0, 0, 0, 0.45);
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .store-detail-section-title {
+    margin: 20px 0 12px !important;
+    padding-top: 16px;
+    border-top: 1px solid #f0f0f0;
+  }
+
+  .store-detail-section-title:first-child {
+    margin-top: 0 !important;
+    padding-top: 0;
+    border-top: 0;
+  }
+
+  .store-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 16px;
+  }
+
+  .store-detail-item-full {
+    grid-column: 1 / -1;
+  }
+
+  .store-detail-label {
+    margin-bottom: 6px;
+    color: rgba(0, 0, 0, 0.55);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .store-detail-value {
+    color: rgba(0, 0, 0, 0.88);
+    font-size: 15px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .store-detail-value-box {
+    min-height: 40px;
+    padding: 8px 11px;
+    border: 1px solid #d9d9d9;
+    border-radius: 6px;
+    background: #fff;
+  }
+
+  .store-detail-description {
+    max-height: 156px;
+    overflow: auto;
+  }
+
+  .store-detail-tag-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .store-detail-hours {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .store-detail-image-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  @media (max-width: 720px) {
+    .store-detail-header {
+      display: block;
+    }
+
+    .store-detail-meta {
+      margin-top: 8px;
+    }
+
+    .store-detail-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+`;
+
 const STATUS_MAP = {
   APPROVED: { color: 'green', label: '승인' },
   PENDING: { color: 'orange', label: '대기' },
@@ -78,7 +188,6 @@ const STATUS_CHANGE_OPTIONS = [
   { value: 'PENDING', label: '대기 (PENDING)' },
   { value: 'APPROVED', label: '승인 (APPROVED)' },
   { value: 'REJECTED', label: '거절 (REJECTED)' },
-  { value: 'HIDDEN', label: '숨김 (HIDDEN)' },
 ];
 
 const CATEGORY_COLORS = {
@@ -223,6 +332,10 @@ const normalizeOptionalText = (value) => {
 
 const compactList = (items) => (Array.isArray(items) ? items.filter(Boolean) : []);
 
+const HiddenBooleanField = () => null;
+
+const isOperationDayActive = (hour) => hour?.isActive !== false && hour?.isActive !== 'false';
+
 const getUploadedImageUrl = (data) => (
   data?.imageUrl
   || data?.url
@@ -235,11 +348,15 @@ const getUploadedImageUrl = (data) => (
 
 const buildOperationHours = (values) => {
   if (values.useCustomOperationHours) {
-    return WEEKDAYS.map((day, index) => ({
-      day,
-      open: normalizeText(values.operationHours?.[index]?.open),
-      close: normalizeText(values.operationHours?.[index]?.close),
-    }));
+    return WEEKDAYS
+      .map((day, index) => ({
+        day,
+        isActive: isOperationDayActive(values.operationHours?.[index]),
+        open: normalizeText(values.operationHours?.[index]?.open),
+        close: normalizeText(values.operationHours?.[index]?.close),
+      }))
+      .filter((item) => item.isActive && item.open && item.close)
+      .map(({ isActive, ...item }) => item);
   }
 
   return WEEKDAYS.map((day) => ({
@@ -249,12 +366,15 @@ const buildOperationHours = (values) => {
   }));
 };
 
+const hasOperationHours = (values) => buildOperationHours(values).length > 0;
+
 const buildStoreCreateRequest = (values, imageUrls) => {
   const request = {
     title: normalizeText(values.title),
     fandomCategoryIds: values.fandomCategoryIds,
     imageUrls,
     description: normalizeText(values.description),
+    hasGacha: values.hasGacha === true,
     keywords: compactList(values.keywords).map(normalizeText).filter(Boolean),
     operationHours: buildOperationHours(values),
     location: {
@@ -262,7 +382,7 @@ const buildStoreCreateRequest = (values, imageUrls) => {
       longitude: Number(values.longitude),
       zip: normalizeText(values.zip),
       address: normalizeText(values.address),
-      addressDetail: normalizeText(values.addressDetail),
+      addressDetail: normalizeOptionalText(values.addressDetail),
     },
     phoneNumber: normalizeOptionalText(values.phoneNumber),
     links: compactList(values.links)
@@ -271,7 +391,6 @@ const buildStoreCreateRequest = (values, imageUrls) => {
         type: normalizeText(item.type),
         link: normalizeText(item.link),
       })),
-    hasGacha: !!values.hasGacha,
   };
 
   if (values.period?.[0] && values.period?.[1]) {
@@ -284,8 +403,10 @@ const buildStoreCreateRequest = (values, imageUrls) => {
   return request;
 };
 
-const buildStoreEditRequest = (values) => ({
+const buildStoreEditRequest = (values, imageUrls) => ({
   title: normalizeText(values.title),
+  fandomCategoryIds: Array.isArray(values.fandomCategoryIds) ? values.fandomCategoryIds : [],
+  imageUrls,
   description: normalizeText(values.description),
   address: normalizeText(values.address),
   addressDetail: normalizeOptionalText(values.addressDetail),
@@ -295,6 +416,8 @@ const buildStoreEditRequest = (values) => ({
   phoneNumber: normalizeOptionalText(values.phoneNumber),
   startDate: values.period?.[0] ? dayjs(values.period[0]).format('YYYY-MM-DD') : null,
   finishDate: values.period?.[1] ? dayjs(values.period[1]).format('YYYY-MM-DD') : null,
+  hasGacha: values.hasGacha === true,
+  keywords: compactList(values.keywords).map(normalizeText).filter(Boolean),
   operationHours: buildOperationHours(values),
   links: compactList(values.links)
     .filter((item) => item?.type || item?.link)
@@ -302,7 +425,6 @@ const buildStoreEditRequest = (values) => ({
       title: LINK_TYPE_LABEL_MAP[item.type] || normalizeText(item.type),
       link: normalizeText(item.link),
     })),
-  hasGacha: !!values.hasGacha,
 });
 
 const getStoreEditFormValues = (store) => {
@@ -326,10 +448,15 @@ const getStoreEditFormValues = (store) => {
     period: store?.startDate && store?.finishDate
       ? [dayjs(store.startDate), dayjs(store.finishDate)]
       : null,
+    fandomCategoryIds: Array.isArray(store?.fandomCategories)
+      ? store.fandomCategories.map((item) => item.fandomCategoryId)
+      : [],
+    keywords: Array.isArray(store?.keywords) ? store.keywords : [],
     useCustomOperationHours,
     commonOpen: firstHour.open || '10:00',
     commonClose: firstHour.close || '20:00',
     operationHours: WEEKDAYS.map((day) => ({
+      isActive: operationHourByDay.has(day),
       open: operationHourByDay.get(day)?.open || firstHour.open || '10:00',
       close: operationHourByDay.get(day)?.close || firstHour.close || '20:00',
     })),
@@ -341,6 +468,17 @@ const getStoreEditFormValues = (store) => {
       : [],
   };
 };
+
+const getExistingImageFileList = (imageUrls) => (
+  Array.isArray(imageUrls)
+    ? imageUrls.map((imageUrl, index) => ({
+      uid: `existing-${index}-${imageUrl}`,
+      name: `image-${index + 1}`,
+      status: 'done',
+      url: imageUrl,
+    }))
+    : []
+);
 
 export default function Stores() {
   const [createForm] = Form.useForm();
@@ -361,13 +499,16 @@ export default function Stores() {
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createFileList, setCreateFileList] = useState([]);
+  const [editFileList, setEditFileList] = useState([]);
   const [categories, setCategories] = useState([]);
   const [addressSearching, setAddressSearching] = useState(false);
   const [useCustomOperationHours, setUseCustomOperationHours] = useState(false);
+  const [createExcludedOperationDays, setCreateExcludedOperationDays] = useState([]);
   const [editOpen, setEditOpen] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editAddressSearching, setEditAddressSearching] = useState(false);
   const [useCustomEditOperationHours, setUseCustomEditOperationHours] = useState(false);
+  const [editExcludedOperationDays, setEditExcludedOperationDays] = useState([]);
   const { notification } = App.useApp();
   const isAllStatusView = !statusFilter || statusFilter === ALL_STATUS;
   const isPendingDetail = detail?.approvalStatus === 'PENDING';
@@ -556,6 +697,8 @@ export default function Stores() {
     setEditSaving(false);
     setEditAddressSearching(false);
     setUseCustomEditOperationHours(false);
+    setEditExcludedOperationDays([]);
+    setEditFileList([]);
     editForm.resetFields();
   };
 
@@ -565,7 +708,13 @@ export default function Stores() {
     const formValues = getStoreEditFormValues(detail);
     editForm.resetFields();
     editForm.setFieldsValue(formValues);
+    setEditFileList(getExistingImageFileList(detail.imageUrls));
     setUseCustomEditOperationHours(formValues.useCustomOperationHours);
+    setEditExcludedOperationDays(
+      formValues.operationHours
+        .map((hour, index) => (isOperationDayActive(hour) ? null : index))
+        .filter((index) => index !== null),
+    );
   }, [detail, editForm, editOpen]);
 
   const handleCloseCreate = () => {
@@ -574,19 +723,21 @@ export default function Stores() {
     setCreateFileList([]);
     setAddressSearching(false);
     setUseCustomOperationHours(false);
+    setCreateExcludedOperationDays([]);
   };
 
   const handleOpenCreate = () => {
     createForm.resetFields();
     setUseCustomOperationHours(false);
+    setCreateExcludedOperationDays([]);
     createForm.setFieldsValue({
       useCustomOperationHours: false,
       commonOpen: '10:00',
       commonClose: '20:00',
-      operationHours: WEEKDAYS.map(() => ({ open: '10:00', close: '20:00' })),
+      operationHours: WEEKDAYS.map(() => ({ isActive: true, open: '10:00', close: '20:00' })),
+      hasGacha: false,
       keywords: [],
       links: [],
-      hasGacha: false,
     });
     setCreateFileList([]);
     setCreateOpen(true);
@@ -709,11 +860,13 @@ export default function Stores() {
     const commonClose = createForm.getFieldValue('commonClose') || '20:00';
 
     setUseCustomOperationHours(checked);
+    if (!checked) setCreateExcludedOperationDays([]);
     createForm.setFieldsValue({
       useCustomOperationHours: checked,
       operationHours: WEEKDAYS.map((_, index) => {
         const currentValue = createForm.getFieldValue(['operationHours', index]) || {};
         return {
+          isActive: isOperationDayActive(currentValue),
           open: currentValue.open || commonOpen,
           close: currentValue.close || commonClose,
         };
@@ -726,11 +879,13 @@ export default function Stores() {
     const commonClose = editForm.getFieldValue('commonClose') || '20:00';
 
     setUseCustomEditOperationHours(checked);
+    if (!checked) setEditExcludedOperationDays([]);
     editForm.setFieldsValue({
       useCustomOperationHours: checked,
       operationHours: WEEKDAYS.map((_, index) => {
         const currentValue = editForm.getFieldValue(['operationHours', index]) || {};
         return {
+          isActive: isOperationDayActive(currentValue),
           open: currentValue.open || commonOpen,
           close: currentValue.close || commonClose,
         };
@@ -738,12 +893,43 @@ export default function Stores() {
     });
   };
 
-  const uploadStoreImages = async () => {
+  const setOperationDayActive = (form, index, isActive, setExcludedDays) => {
+    const currentHours = form.getFieldValue('operationHours') || [];
+    const commonOpen = form.getFieldValue('commonOpen') || '10:00';
+    const commonClose = form.getFieldValue('commonClose') || '20:00';
+
+    setExcludedDays((days) => (
+      isActive
+        ? days.filter((dayIndex) => dayIndex !== index)
+        : Array.from(new Set([...days, index])).sort((a, b) => a - b)
+    ));
+
+    form.setFieldsValue({
+      operationHours: WEEKDAYS.map((_, currentIndex) => {
+        const currentValue = currentHours[currentIndex] || {};
+        if (currentIndex !== index) return currentValue;
+
+        return {
+          ...currentValue,
+          isActive,
+          open: isActive ? currentValue.open || commonOpen : null,
+          close: isActive ? currentValue.close || commonClose : null,
+        };
+      }),
+    });
+  };
+
+  const uploadStoreImages = async (fileList) => {
     const imageUrls = [];
 
-    for (const file of createFileList) {
+    for (const file of fileList) {
+      if (file.url) {
+        imageUrls.push(file.url);
+        continue;
+      }
+
       const formData = new FormData();
-      formData.append('image', file.originFileObj);
+      formData.append('images', file.originFileObj);
 
       const res = await client.post('/shared/upload-image', formData, {
         params: { imageType: 'STORE' },
@@ -783,9 +969,17 @@ export default function Stores() {
       return;
     }
 
+    if (!hasOperationHours(values)) {
+      notification.error({
+        message: '운영 시간 확인 필요',
+        description: '운영 요일을 하나 이상 남겨주세요.',
+      });
+      return;
+    }
+
     setCreating(true);
     try {
-      const imageUrls = await uploadStoreImages();
+      const imageUrls = await uploadStoreImages(createFileList);
       await client.post(STORE_CREATE_ENDPOINT, buildStoreCreateRequest(values, imageUrls));
       notification.success({ message: '스토어 추가 완료', description: '새 스토어가 등록되었습니다.' });
       handleCloseCreate();
@@ -815,9 +1009,26 @@ export default function Stores() {
       throw err;
     }
 
+    if (editFileList.length < 1 || editFileList.length > 5) {
+      notification.error({
+        message: '이미지 확인 필요',
+        description: '스토어 이미지는 1개 이상 5개 이하로 등록해주세요.',
+      });
+      return;
+    }
+
+    if (!hasOperationHours(values)) {
+      notification.error({
+        message: '운영 시간 확인 필요',
+        description: '운영 요일을 하나 이상 남겨주세요.',
+      });
+      return;
+    }
+
     setEditSaving(true);
     try {
-      await client.put(`/admin/store/${detail.storeId}`, buildStoreEditRequest(values));
+      const imageUrls = await uploadStoreImages(editFileList);
+      await client.put(`/admin/store/${detail.storeId}`, buildStoreEditRequest(values, imageUrls));
       notification.success({ message: '수정 완료', description: '스토어 정보가 수정되었습니다.' });
       handleCloseEdit();
 
@@ -1002,7 +1213,7 @@ export default function Stores() {
           setPendingHasGacha(false);
         }}
         footer={modalFooter}
-        width={820}
+        width={900}
       >
         {detailLoading && (
           <div style={{ display: 'flex', justifyContent: 'center', padding: '32px 0' }}>
@@ -1019,58 +1230,121 @@ export default function Stores() {
                 description="스토어 정보를 확인한 뒤 승인 또는 거절을 선택하세요."
               />
             )}
-            <Descriptions bordered column={1} size="small">
-              <Descriptions.Item label="ID">{detail.storeId}</Descriptions.Item>
-              <Descriptions.Item label="제목">{detail.title || '-'}</Descriptions.Item>
-              <Descriptions.Item label="설명">{detail.description || '-'}</Descriptions.Item>
-              <Descriptions.Item label="승인 상태">
+            <DetailView>
+              <div className="store-detail-header">
+                <div>
+                  <div className="store-detail-title">{detail.title || '-'}</div>
+                  <div className="store-detail-meta">
+                    <span>ID {detail.storeId}</span>
+                    <span>·</span>
+                    <span>{detail.createdAt ? new Date(detail.createdAt).toLocaleString('ko-KR') : '-'}</span>
+                  </div>
+                </div>
                 <Tag color={(STATUS_MAP[detail.approvalStatus] || { color: 'default' }).color}>
                   {(STATUS_MAP[detail.approvalStatus] || { label: detail.approvalStatus }).label}
                 </Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label="주소">
-                {[detail.address, detail.addressDetail].filter(Boolean).join(' ') || '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label="우편번호">{detail.zip || '-'}</Descriptions.Item>
-              <Descriptions.Item label="전화번호">{detail.phoneNumber || '-'}</Descriptions.Item>
-              <Descriptions.Item label="기간">
-                {detail.startDate || '-'} ~ {detail.finishDate || '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label="키워드">
-                {normalizeKeywords(detail.keywords).length
-                  ? (
-                    <Space wrap size={[8, 8]}>
-                      {normalizeKeywords(detail.keywords).map((keyword) => (
-                        <Tag key={keyword} style={KEYWORD_TAG_STYLE}>
-                          {keyword}
-                        </Tag>
-                      ))}
-                    </Space>
-                  )
-                  : '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label="카테고리">
-                {detail.fandomCategories?.length
-                  ? detail.fandomCategories.map((category) => (
-                    <Tag
-                      key={category.fandomCategoryId}
-                      color={CATEGORY_COLORS[category.category] || 'default'}
-                    >
-                      {category.displayName}
+              </div>
+
+              <Typography.Title className="store-detail-section-title" level={5}>기본 정보</Typography.Title>
+              <div className="store-detail-grid">
+                <div className="store-detail-item-full">
+                  <div className="store-detail-label">설명</div>
+                  <div className="store-detail-value store-detail-value-box store-detail-description">
+                    {detail.description || '-'}
+                  </div>
+                </div>
+                <div>
+                  <div className="store-detail-label">카테고리</div>
+                  <div className="store-detail-value store-detail-value-box">
+                    {detail.fandomCategories?.length
+                      ? (
+                        <div className="store-detail-tag-row">
+                          {detail.fandomCategories.map((category) => (
+                            <Tag
+                              key={category.fandomCategoryId}
+                              color={CATEGORY_COLORS[category.category] || 'default'}
+                              style={{ marginInlineEnd: 0 }}
+                            >
+                              {category.displayName}
+                            </Tag>
+                          ))}
+                        </div>
+                      )
+                      : '-'}
+                  </div>
+                </div>
+                <div>
+                  <div className="store-detail-label">키워드</div>
+                  <div className="store-detail-value store-detail-value-box">
+                    {normalizeKeywords(detail.keywords).length
+                      ? (
+                        <div className="store-detail-tag-row">
+                          {normalizeKeywords(detail.keywords).map((keyword) => (
+                            <Tag key={keyword} style={KEYWORD_TAG_STYLE}>
+                              {keyword}
+                            </Tag>
+                          ))}
+                        </div>
+                      )
+                      : '-'}
+                  </div>
+                </div>
+                <div>
+                  <div className="store-detail-label">아이템 뽑기</div>
+                  <div className="store-detail-value store-detail-value-box">
+                    <Tag color={detail.hasGacha ? 'blue' : 'default'} style={{ marginInlineEnd: 0 }}>
+                      {detail.hasGacha ? 'ON' : 'OFF'}
                     </Tag>
-                  ))
-                  : '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label="운영 시간">
-                {detail.operationHours?.length
-                  ? detail.operationHours.map((item) => (
-                    <div key={`${item.day}-${item.open}-${item.close}`}>
-                      {item.day}: {item.open || '-'} - {item.close || '-'}
-                    </div>
-                  ))
-                  : '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label="링크">
+                  </div>
+                </div>
+              </div>
+
+              <Typography.Title className="store-detail-section-title" level={5}>위치</Typography.Title>
+              <div className="store-detail-grid">
+                <div className="store-detail-item-full">
+                  <div className="store-detail-label">주소</div>
+                  <div className="store-detail-value store-detail-value-box">
+                    {[detail.address, detail.addressDetail].filter(Boolean).join(' ') || '-'}
+                  </div>
+                </div>
+                <div>
+                  <div className="store-detail-label">우편번호</div>
+                  <div className="store-detail-value store-detail-value-box">{detail.zip || '-'}</div>
+                </div>
+                <div>
+                  <div className="store-detail-label">전화번호</div>
+                  <div className="store-detail-value store-detail-value-box">{detail.phoneNumber || '-'}</div>
+                </div>
+              </div>
+
+              <Typography.Title className="store-detail-section-title" level={5}>기간 및 운영 시간</Typography.Title>
+              <div className="store-detail-grid">
+                <div>
+                  <div className="store-detail-label">기간</div>
+                  <div className="store-detail-value store-detail-value-box">
+                    {detail.startDate || '-'} ~ {detail.finishDate || '-'}
+                  </div>
+                </div>
+                <div className="store-detail-item-full">
+                  <div className="store-detail-label">운영 시간</div>
+                  <div className="store-detail-value store-detail-value-box">
+                    {detail.operationHours?.length
+                      ? (
+                        <div className="store-detail-hours">
+                          {detail.operationHours.map((item) => (
+                            <div key={`${item.day}-${item.open}-${item.close}`}>
+                              {item.day}: {item.open || '-'} - {item.close || '-'}
+                            </div>
+                          ))}
+                        </div>
+                      )
+                      : '-'}
+                  </div>
+                </div>
+              </div>
+
+              <Typography.Title className="store-detail-section-title" level={5}>링크</Typography.Title>
+              <div className="store-detail-value store-detail-value-box">
                 {detail.links?.length
                   ? detail.links.map((item, index) => (
                     <div key={`${item.link}-${index}`}>
@@ -1080,22 +1354,19 @@ export default function Stores() {
                     </div>
                   ))
                   : '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label="이미지">
-                {detail.imageUrls?.length
-                  ? (
-                    <Space wrap>
-                      {detail.imageUrls.map((imageUrl, index) => (
-                        <Image key={`${imageUrl}-${index}`} src={imageUrl} width={120} />
-                      ))}
-                    </Space>
-                  )
-                  : '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label="요청일">
-                {detail.createdAt ? new Date(detail.createdAt).toLocaleString('ko-KR') : '-'}
-              </Descriptions.Item>
-            </Descriptions>
+              </div>
+
+              <Typography.Title className="store-detail-section-title" level={5}>이미지</Typography.Title>
+              {detail.imageUrls?.length
+                ? (
+                  <div className="store-detail-image-list">
+                    {detail.imageUrls.map((imageUrl, index) => (
+                      <Image key={`${imageUrl}-${index}`} src={imageUrl} width={128} />
+                    ))}
+                  </div>
+                )
+                : <div className="store-detail-value store-detail-value-box">-</div>}
+            </DetailView>
           </Space>
         )}
       </Modal>
@@ -1129,6 +1400,20 @@ export default function Stores() {
             <Input maxLength={50} showCount />
           </Form.Item>
           <Form.Item
+            label="카테고리"
+            name="fandomCategoryIds"
+            rules={[{ required: true, message: '카테고리를 하나 이상 선택해주세요.' }]}
+          >
+            <Select
+              mode="multiple"
+              placeholder="카테고리 선택"
+              options={categories.map((category) => ({
+                value: category.fandomCategoryId,
+                label: category.displayName,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item
             label="설명"
             name="description"
             rules={[
@@ -1141,6 +1426,50 @@ export default function Stores() {
           </Form.Item>
           <Form.Item label="아이템 뽑기" name="hasGacha" valuePropName="checked">
             <Switch checkedChildren="ON" unCheckedChildren="OFF" />
+          </Form.Item>
+          <Form.Item label="키워드">
+            <Form.List name="keywords">
+              {(fields, { add, remove }) => (
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  {fields.map(({ key, name, ...restField }) => (
+                    <Space key={key} align="baseline">
+                      <Form.Item
+                        {...restField}
+                        name={name}
+                        rules={[{ whitespace: true, message: '빈 키워드는 등록할 수 없습니다.' }]}
+                      >
+                        <Input placeholder="키워드" style={{ width: 240 }} />
+                      </Form.Item>
+                      <Button danger type="link" onClick={() => remove(name)}>
+                        삭제
+                      </Button>
+                    </Space>
+                  ))}
+                  <Button disabled={fields.length >= 5} onClick={() => add('')}>
+                    키워드 추가
+                  </Button>
+                </Space>
+              )}
+            </Form.List>
+          </Form.Item>
+          <Form.Item
+            label="이미지"
+            required
+            extra="기존 이미지를 유지하거나 삭제하고, 새 이미지를 추가할 수 있습니다. 총 1개 이상 5개 이하로 저장됩니다."
+          >
+            <Upload
+              accept="image/*"
+              maxCount={5}
+              multiple
+              fileList={editFileList}
+              beforeUpload={() => false}
+              onChange={({ fileList }) => setEditFileList(fileList.slice(-5))}
+              listType="picture"
+            >
+              {editFileList.length < 5 && (
+                <Button icon={<UploadOutlined />}>이미지 선택</Button>
+              )}
+            </Upload>
           </Form.Item>
 
           <Typography.Title className="store-form-section-title" level={5}>위치</Typography.Title>
@@ -1161,7 +1490,6 @@ export default function Stores() {
           <Form.Item
             label="상세 주소"
             name="addressDetail"
-            rules={[{ required: true, message: '상세 주소를 입력해주세요.' }]}
           >
             <Input placeholder="예: 2층, 101호, 팝업존 내부" />
           </Form.Item>
@@ -1227,35 +1555,85 @@ export default function Stores() {
               </Space>
               {useCustomEditOperationHours && (
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                  {WEEKDAYS.map((day, index) => (
-                    <Space key={day} wrap align="baseline">
-                      <Typography.Text strong style={{ width: 32 }}>
-                        {day}
-                      </Typography.Text>
-                      <Form.Item
-                        name={['operationHours', index, 'open']}
-                        noStyle
-                        rules={[
-                          { required: true, message: `${day}요일 오픈 시간` },
-                          { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
-                        ]}
-                      >
-                        <Input placeholder="10:00" style={{ width: 140 }} />
-                      </Form.Item>
-                      <Typography.Text>부터</Typography.Text>
-                      <Form.Item
-                        name={['operationHours', index, 'close']}
-                        noStyle
-                        rules={[
-                          { required: true, message: `${day}요일 마감 시간` },
-                          { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
-                        ]}
-                      >
-                        <Input placeholder="20:00" style={{ width: 140 }} />
-                      </Form.Item>
-                      <Typography.Text>까지</Typography.Text>
-                    </Space>
-                  ))}
+                  <Form.Item noStyle shouldUpdate>
+                    {({ getFieldValue }) => {
+                      const operationHours = getFieldValue('operationHours') || [];
+                      const activeDays = WEEKDAYS
+                        .map((day, index) => ({
+                          day,
+                          index,
+                          isActive: !editExcludedOperationDays.includes(index),
+                        }))
+                        .filter((item) => item.isActive);
+                      const inactiveDays = WEEKDAYS
+                        .map((day, index) => ({
+                          day,
+                          index,
+                          isActive: !editExcludedOperationDays.includes(index),
+                        }))
+                        .filter((item) => !item.isActive);
+
+                      return (
+                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                          {activeDays.map(({ day, index }) => (
+                            <Space key={day} wrap align="baseline">
+                              <Form.Item name={['operationHours', index, 'isActive']} hidden>
+                                <HiddenBooleanField />
+                              </Form.Item>
+                              <Typography.Text strong style={{ width: 32 }}>
+                                {day}
+                              </Typography.Text>
+                              <Form.Item
+                                name={['operationHours', index, 'open']}
+                                noStyle
+                                rules={[
+                                  { required: true, message: `${day}요일 오픈 시간` },
+                                  { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
+                                ]}
+                              >
+                                <Input placeholder="10:00" style={{ width: 140 }} />
+                              </Form.Item>
+                              <Typography.Text>부터</Typography.Text>
+                              <Form.Item
+                                name={['operationHours', index, 'close']}
+                                noStyle
+                                rules={[
+                                  { required: true, message: `${day}요일 마감 시간` },
+                                  { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
+                                ]}
+                              >
+                                <Input placeholder="20:00" style={{ width: 140 }} />
+                              </Form.Item>
+                              <Typography.Text>까지</Typography.Text>
+                              <Button
+                                aria-label={`${day}요일 제외`}
+                                htmlType="button"
+                                icon={<CloseOutlined />}
+                                size="small"
+                                type="text"
+                                onClick={() => setOperationDayActive(editForm, index, false, setEditExcludedOperationDays)}
+                              />
+                            </Space>
+                          ))}
+                          {inactiveDays.length > 0 && (
+                            <Space wrap>
+                              <Typography.Text type="secondary">제외한 요일</Typography.Text>
+                              {inactiveDays.map(({ day, index }) => (
+                                <Button
+                                  key={day}
+                                  htmlType="button"
+                                  size="small"
+                                  onClick={() => setOperationDayActive(editForm, index, true, setEditExcludedOperationDays)}
+                                >
+                                  {day} 추가
+                                </Button>
+                              ))}
+                            </Space>
+                          )}
+                        </Space>
+                      );
+                    }}
+                  </Form.Item>
                 </Space>
               )}
             </Space>
@@ -1415,7 +1793,6 @@ export default function Stores() {
           <Form.Item
             label="상세 주소"
             name="addressDetail"
-            rules={[{ required: true, message: '상세 주소를 입력해주세요.' }]}
           >
             <Input placeholder="예: 2층, 101호, 팝업존 내부" />
           </Form.Item>
@@ -1481,35 +1858,85 @@ export default function Stores() {
               </Space>
               {useCustomOperationHours && (
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                  {WEEKDAYS.map((day, index) => (
-                    <Space key={day} wrap align="baseline">
-                      <Typography.Text strong style={{ width: 32 }}>
-                        {day}
-                      </Typography.Text>
-                      <Form.Item
-                        name={['operationHours', index, 'open']}
-                        noStyle
-                        rules={[
-                          { required: true, message: `${day}요일 오픈 시간` },
-                          { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
-                        ]}
-                      >
-                        <Input placeholder="10:00" style={{ width: 140 }} />
-                      </Form.Item>
-                      <Typography.Text>부터</Typography.Text>
-                      <Form.Item
-                        name={['operationHours', index, 'close']}
-                        noStyle
-                        rules={[
-                          { required: true, message: `${day}요일 마감 시간` },
-                          { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
-                        ]}
-                      >
-                        <Input placeholder="20:00" style={{ width: 140 }} />
-                      </Form.Item>
-                      <Typography.Text>까지</Typography.Text>
-                    </Space>
-                  ))}
+                  <Form.Item noStyle shouldUpdate>
+                    {({ getFieldValue }) => {
+                      const operationHours = getFieldValue('operationHours') || [];
+                      const activeDays = WEEKDAYS
+                        .map((day, index) => ({
+                          day,
+                          index,
+                          isActive: !createExcludedOperationDays.includes(index),
+                        }))
+                        .filter((item) => item.isActive);
+                      const inactiveDays = WEEKDAYS
+                        .map((day, index) => ({
+                          day,
+                          index,
+                          isActive: !createExcludedOperationDays.includes(index),
+                        }))
+                        .filter((item) => !item.isActive);
+
+                      return (
+                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                          {activeDays.map(({ day, index }) => (
+                            <Space key={day} wrap align="baseline">
+                              <Form.Item name={['operationHours', index, 'isActive']} hidden>
+                                <HiddenBooleanField />
+                              </Form.Item>
+                              <Typography.Text strong style={{ width: 32 }}>
+                                {day}
+                              </Typography.Text>
+                              <Form.Item
+                                name={['operationHours', index, 'open']}
+                                noStyle
+                                rules={[
+                                  { required: true, message: `${day}요일 오픈 시간` },
+                                  { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
+                                ]}
+                              >
+                                <Input placeholder="10:00" style={{ width: 140 }} />
+                              </Form.Item>
+                              <Typography.Text>부터</Typography.Text>
+                              <Form.Item
+                                name={['operationHours', index, 'close']}
+                                noStyle
+                                rules={[
+                                  { required: true, message: `${day}요일 마감 시간` },
+                                  { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
+                                ]}
+                              >
+                                <Input placeholder="20:00" style={{ width: 140 }} />
+                              </Form.Item>
+                              <Typography.Text>까지</Typography.Text>
+                              <Button
+                                aria-label={`${day}요일 제외`}
+                                htmlType="button"
+                                icon={<CloseOutlined />}
+                                size="small"
+                                type="text"
+                                onClick={() => setOperationDayActive(createForm, index, false, setCreateExcludedOperationDays)}
+                              />
+                            </Space>
+                          ))}
+                          {inactiveDays.length > 0 && (
+                            <Space wrap>
+                              <Typography.Text type="secondary">제외한 요일</Typography.Text>
+                              {inactiveDays.map(({ day, index }) => (
+                                <Button
+                                  key={day}
+                                  htmlType="button"
+                                  size="small"
+                                  onClick={() => setOperationDayActive(createForm, index, true, setCreateExcludedOperationDays)}
+                                >
+                                  {day} 추가
+                                </Button>
+                              ))}
+                            </Space>
+                          )}
+                        </Space>
+                      );
+                    }}
+                  </Form.Item>
                 </Space>
               )}
             </Space>
