@@ -39,6 +39,7 @@ const normalizeRequiredTextValue = (value) => {
 
 export const buildStoreApplyRequest = (values) => ({
   title: normalizeRequiredTextValue(values.title),
+  fandomCategoryIds: values.fandomCategoryIds,
   description: normalizeRequiredTextValue(values.description),
   address: normalizeRequiredTextValue(values.address),
   addressDetail: normalizeOptionalTextValue(values.addressDetail),
@@ -48,6 +49,9 @@ export const buildStoreApplyRequest = (values) => ({
   phoneNumber: normalizeOptionalTextValue(values.phoneNumber),
   startDate: normalizeOptionalTextValue(values.startDate),
   finishDate: normalizeOptionalTextValue(values.finishDate),
+  keywords: Array.isArray(values.keywords)
+    ? values.keywords.filter(Boolean).map((item) => normalizeRequiredTextValue(item)).filter(Boolean)
+    : [],
   operationHours: Array.isArray(values.operationHours)
     ? values.operationHours
       .filter((item) => item?.day || item?.open || item?.close)
