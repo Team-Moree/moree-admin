@@ -1556,7 +1556,13 @@ export default function Stores() {
           <Form.Item
             label="이미지"
             required
-            extra="기존 이미지를 유지하거나 삭제하고, 새 이미지를 추가할 수 있습니다. 총 1개 이상 5개 이하로 저장됩니다."
+            extra={(
+              <>
+                기존 이미지를 유지하거나 삭제하고, 새 이미지를 추가할 수 있습니다. 총 1개 이상 5개 이하로 저장됩니다.
+                <br />
+                맨 위 이미지가 대표 이미지로 노출되며, 드래그로 순서를 바꿀 수 있습니다.
+              </>
+            )}
           >
             <Upload
               accept="image/*"
@@ -1861,7 +1867,13 @@ export default function Stores() {
           <Form.Item
             label="이미지"
             required
-            extra="스토어 이미지는 1개 이상 5개 이하로 업로드합니다."
+            extra={(
+              <>
+                스토어 이미지는 1개 이상 5개 이하로 업로드합니다.
+                <br />
+                맨 위 이미지가 대표 이미지로 노출되며, 드래그로 순서를 바꿀 수 있습니다.
+              </>
+            )}
           >
             <Upload
               accept="image/*"
