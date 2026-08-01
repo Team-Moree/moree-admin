@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Image, Spin, Popconfirm, Alert, Input, Form, DatePicker, Upload, Switch, Segmented } from 'antd';
-import { CloseOutlined, EditOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
+import { CloseOutlined, EditOutlined, HolderOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import dayjs from 'dayjs';
 import client from '../api/client';
@@ -64,6 +64,29 @@ const StoreForm = styled(Form)`
     .store-link-row {
       grid-template-columns: 1fr;
     }
+  }
+
+  .store-form-upload-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    cursor: grab;
+  }
+
+  .store-form-upload-item:active {
+    cursor: grabbing;
+  }
+
+  .store-form-upload-item-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .store-form-upload-item-handle {
+    flex-shrink: 0;
+    color: rgba(0, 0, 0, 0.45);
+    font-size: 16px;
   }
 `;
 
@@ -492,6 +515,53 @@ const getExistingImageFileList = (imageUrls) => (
     : []
 );
 
+const moveFileListItem = (fileList, fromIndex, toIndex) => {
+  if (fromIndex < 0 || toIndex < 0 || toIndex >= fileList.length) {
+    return fileList;
+  }
+  const next = [...fileList];
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved);
+  return next;
+};
+
+const renderReorderableUploadItem = (fileList, setFileList, dragIndexRef) => (originNode, file) => {
+  const index = fileList.findIndex((item) => item.uid === file.uid);
+
+  const handleDragStart = (event) => {
+    dragIndexRef.current = index;
+    event.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (event) => {
+    event.preventDefault();
+    const fromIndex = dragIndexRef.current;
+    dragIndexRef.current = null;
+    if (fromIndex === null || fromIndex === index) {
+      return;
+    }
+    setFileList((prev) => moveFileListItem(prev, fromIndex, index));
+  };
+
+  return (
+    <div
+      className="store-form-upload-item"
+      draggable
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      <HolderOutlined className="store-form-upload-item-handle" />
+      <div className="store-form-upload-item-content">{originNode}</div>
+    </div>
+  );
+};
+
 export default function Stores() {
   const [createForm] = Form.useForm();
   const [editForm] = Form.useForm();
@@ -512,6 +582,8 @@ export default function Stores() {
   const [creating, setCreating] = useState(false);
   const [createFileList, setCreateFileList] = useState([]);
   const [editFileList, setEditFileList] = useState([]);
+  const createDragIndexRef = useRef(null);
+  const editDragIndexRef = useRef(null);
   const [categories, setCategories] = useState([]);
   const [addressSearching, setAddressSearching] = useState(false);
   const [useCustomOperationHours, setUseCustomOperationHours] = useState(false);
@@ -1494,6 +1566,7 @@ export default function Stores() {
               beforeUpload={() => false}
               onChange={({ fileList }) => setEditFileList(fileList.slice(-5))}
               listType="picture"
+              itemRender={renderReorderableUploadItem(editFileList, setEditFileList, editDragIndexRef)}
             >
               {editFileList.length < 5 && (
                 <Button icon={<UploadOutlined />}>이미지 선택</Button>
@@ -1798,6 +1871,7 @@ export default function Stores() {
               beforeUpload={() => false}
               onChange={({ fileList }) => setCreateFileList(fileList.slice(-5))}
               listType="picture"
+              itemRender={renderReorderableUploadItem(createFileList, setCreateFileList, createDragIndexRef)}
             >
               {createFileList.length < 5 && (
                 <Button icon={<UploadOutlined />}>이미지 선택</Button>
