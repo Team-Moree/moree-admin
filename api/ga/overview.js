@@ -26,7 +26,7 @@ import pkg from '@google-analytics/data';
 
 const { BetaAnalyticsDataClient } = pkg;
 
-const KEY_EVENTS = ['first_open', 'sign_up', 'login'];
+const KEY_EVENTS = ['first_open', 'sign_up', 'login', 'review_submit'];
 
 class HttpError extends Error {
   constructor(status, code, message) {
@@ -98,6 +98,60 @@ function isValidDate(s) {
   return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
+// 맞춤 측정기준(customEvent:*) 리포트 — GA4 콘솔 등록 + 앱 계측이 선행돼야 데이터가 나온다.
+// 미등록이면 API 가 에러를 던지므로 격리해 {rows, error} 로 반환한다.
+async function customDimReport(client, property, dateRanges, { dim, eventName, limit = 10 }) {
+  try {
+    const request = {
+      property,
+      dateRanges,
+      dimensions: [{ name: dim }],
+      metrics: [{ name: 'eventCount' }],
+      orderBys: [{ metric: { metricName: 'eventCount' }, desc: true }],
+      limit,
+    };
+    if (eventName) {
+      request.dimensionFilter = {
+        filter: { fieldName: 'eventName', stringFilter: { value: eventName } },
+      };
+    }
+    const [resp] = await client.runReport(request);
+    const rows = normalizeRows(resp)
+      .map((r) => ({ name: r[dim], count: r.eventCount }))
+      .filter((r) => r.name && r.name !== '(not set)');
+    return { rows, error: null };
+  } catch (e) {
+    return { rows: [], error: e?.message || '맞춤 측정기준 미등록으로 조회 불가' };
+  }
+}
+
+// 재방문율(D1/D7/D30) — cohortSpec 기반. 선택 기간을 하나의 코호트로 보고 산출.
+// (cohortSpec 은 dateRanges 와 함께 못 쓴다) 최근 가입자는 아직 D30 에 도달 못해 과소집계될 수 있다.
+async function runRetention(client, property, startDate, endDate) {
+  try {
+    const [resp] = await client.runReport({
+      property,
+      dimensions: [{ name: 'cohortNthDay' }],
+      metrics: [{ name: 'cohortActiveUsers' }, { name: 'cohortTotalUsers' }],
+      cohortSpec: {
+        cohorts: [{ name: 'cohort', dimension: 'firstSessionDate', dateRange: { startDate, endDate } }],
+        cohortsRange: { granularity: 'DAILY', startOffset: 0, endOffset: 30 },
+      },
+    });
+    const byDay = {};
+    let total = 0;
+    for (const r of normalizeRows(resp)) {
+      byDay[Number(r.cohortNthDay)] = r.cohortActiveUsers;
+      total = Math.max(total, r.cohortTotalUsers || 0);
+    }
+    const rate = (n) =>
+      total > 0 && byDay[n] != null ? Number(((byDay[n] / total) * 100).toFixed(1)) : null;
+    return { totalUsers: total, d1: rate(1), d7: rate(7), d30: rate(30), error: null };
+  } catch (e) {
+    return { totalUsers: 0, d1: null, d7: null, d30: null, error: e?.message || '재방문율 조회 실패' };
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
@@ -116,7 +170,7 @@ export default async function handler(req, res) {
     const client = getClient({ clientEmail, privateKey });
     const property = `properties/${propertyId}`;
 
-    // 안정적인 3개 리포트는 batch 로 한 번에 호출
+    // 내장 차원 리포트는 batch 로 한 번에 (GA4 batchRunReports 최대 5개)
     const [batch] = await client.batchRunReports({
       property,
       requests: [
@@ -130,7 +184,7 @@ export default async function handler(req, res) {
             { name: 'sessions' },
           ],
         },
-        // 1) 핵심 이벤트 카운트 (first_open / sign_up / login)
+        // 1) 핵심 이벤트 카운트 (first_open / sign_up / login / review_submit)
         {
           dateRanges,
           dimensions: [{ name: 'eventName' }],
@@ -147,17 +201,25 @@ export default async function handler(req, res) {
           orderBys: [{ metric: { metricName: 'eventCount' }, desc: true }],
           limit: 10,
         },
-        // 3) 일별 사용자 추이 (활성/신규) — 추이 라인차트용
+        // 3) 일별 사용자 추이 (활성/신규)
         {
           dateRanges,
           dimensions: [{ name: 'date' }],
           metrics: [{ name: 'activeUsers' }, { name: 'newUsers' }],
           orderBys: [{ dimension: { dimensionName: 'date' } }],
         },
+        // 4) 플랫폼별 (iOS/Android) — 내장 platform 차원
+        {
+          dateRanges,
+          dimensions: [{ name: 'platform' }],
+          metrics: [{ name: 'activeUsers' }, { name: 'newUsers' }],
+          orderBys: [{ metric: { metricName: 'activeUsers' }, desc: true }],
+        },
       ],
     });
 
-    const [userReport, keyEventReport, topEventReport, dailyReport] = batch.reports || [];
+    const [userReport, keyEventReport, topEventReport, dailyReport, platformReport] =
+      batch.reports || [];
 
     const userRow = normalizeRows(userReport)[0] || {};
     const userTotals = {
@@ -184,28 +246,53 @@ export default async function handler(req, res) {
       return { date, activeUsers: r.activeUsers, newUsers: r.newUsers };
     });
 
-    // 검색어 리포트: customEvent:search_term 은 GA4 콘솔의 맞춤 측정기준 등록이 선행돼야 한다.
-    // 미등록이면 API 가 에러를 반환하므로, 전체 응답이 실패하지 않도록 별도 호출 + 격리한다.
-    let searchTerms = [];
-    let searchTermsError = null;
-    try {
-      const [searchReport] = await client.runReport({
+    const platforms = normalizeRows(platformReport)
+      .map((r) => ({ platform: r.platform, activeUsers: r.activeUsers, newUsers: r.newUsers }))
+      .filter((r) => r.platform && r.platform !== '(not set)');
+
+    // 병렬 실행: 화면별 조회(내장) · 재방문율(cohort) · 맞춤차원 리포트(등록 전 격리)
+    const screensP = client
+      .runReport({
         property,
         dateRanges,
-        dimensions: [{ name: 'customEvent:search_term' }],
-        metrics: [{ name: 'eventCount' }],
-        dimensionFilter: {
-          filter: { fieldName: 'eventName', stringFilter: { value: 'search' } },
-        },
-        orderBys: [{ metric: { metricName: 'eventCount' }, desc: true }],
+        dimensions: [{ name: 'screenName' }],
+        metrics: [{ name: 'screenPageViews' }],
+        orderBys: [{ metric: { metricName: 'screenPageViews' }, desc: true }],
         limit: 10,
-      });
-      searchTerms = normalizeRows(searchReport)
-        .map((r) => ({ searchTerm: r['customEvent:search_term'], eventCount: r.eventCount }))
-        .filter((r) => r.searchTerm && r.searchTerm !== '(not set)');
-    } catch (e) {
-      searchTermsError = e?.message || '검색어 리포트를 불러오지 못했습니다.';
-    }
+      })
+      .then(([resp]) =>
+        normalizeRows(resp)
+          .map((r) => ({ screenName: r.screenName, views: r.screenPageViews }))
+          .filter((r) => r.screenName && r.screenName !== '(not set)')
+      )
+      .catch(() => []);
+
+    const retentionP = runRetention(client, property, startDate, endDate);
+
+    // B그룹: 맞춤 측정기준 (view_item 파라미터 기준). 등록 전엔 {rows:[], error} 로 반환.
+    const searchP = customDimReport(client, property, dateRanges, {
+      dim: 'customEvent:search_term',
+      eventName: 'search',
+    });
+    const storeP = customDimReport(client, property, dateRanges, {
+      dim: 'customEvent:item_name',
+      eventName: 'view_item',
+    });
+    const locationP = customDimReport(client, property, dateRanges, {
+      dim: 'customEvent:location',
+      eventName: 'view_item',
+    });
+    const eventTypeP = customDimReport(client, property, dateRanges, {
+      dim: 'customEvent:event_type',
+      eventName: 'view_item',
+    });
+    const statusP = customDimReport(client, property, dateRanges, {
+      dim: 'customEvent:status',
+      eventName: 'view_item',
+    });
+
+    const [topScreens, retention, searchRes, storeRes, locationRes, eventTypeRes, statusRes] =
+      await Promise.all([screensP, retentionP, searchP, storeP, locationP, eventTypeP, statusP]);
 
     return res.status(200).json({
       dateRange: { startDate, endDate },
@@ -213,8 +300,17 @@ export default async function handler(req, res) {
       keyEventCounts,
       topEvents,
       dailyUsers,
-      searchTerms,
-      searchTermsError,
+      platforms,
+      topScreens,
+      retention,
+      // 검색어(B그룹) — 하위호환 위해 기존 키 유지
+      searchTerms: searchRes.rows.map((r) => ({ searchTerm: r.name, eventCount: r.count })),
+      searchTermsError: searchRes.error,
+      // B그룹: 행사/지역/유형/상태 (등록 후 채워짐)
+      byStore: storeRes,
+      byLocation: locationRes,
+      byEventType: eventTypeRes,
+      byStatus: statusRes,
     });
   } catch (err) {
     if (err instanceof HttpError) {
