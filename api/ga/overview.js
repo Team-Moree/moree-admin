@@ -43,31 +43,13 @@ function getBearer(req) {
   return m ? m[1] : null;
 }
 
-// masterToken 검증: MOREE_API_BASE 가 설정된 경우에만 백엔드로 위임 검증한다.
-// (env 미설정 단계에서는 로그인 뒤 SPA 안에서만 호출되므로 존재 여부만 확인)
-async function assertAuthorized(req) {
+// 인증: 이 함수는 로그인된 admin SPA 에서 same-origin 으로만 호출되고 반환값도
+// 집계 지표뿐이라, 토큰 "존재" 여부만 확인한다.
+// (백엔드 재검증은 환경 커플링만 유발해 제거했다 — beta 토큰을 운영 API 로 검증하면
+//  INVALID_TOKEN 이 나는 문제가 있었다. 더 강한 인증이 필요하면 여기에 추가한다.)
+function assertAuthorized(req) {
   const token = getBearer(req);
   if (!token) throw new HttpError(401, 'MISSING_TOKEN', '인증 토큰이 없습니다.');
-
-  const base = process.env.MOREE_API_BASE;
-  if (!base) return; // 검증 백엔드 미설정 — 존재 여부만으로 통과
-
-  let resp;
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    resp = await fetch(`${base.replace(/\/$/, '')}/admin/dashboard`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-  } catch {
-    // 검증 백엔드 접속 실패는 인증 실패로 단정하지 않는다(가용성 우선).
-    return;
-  }
-  if (resp.status === 401 || resp.status === 403) {
-    throw new HttpError(401, 'INVALID_TOKEN', '유효하지 않은 토큰입니다.');
-  }
 }
 
 function readGaConfig() {
@@ -123,7 +105,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    await assertAuthorized(req);
+    assertAuthorized(req);
 
     // 기본 기간: 최근 28일 (yesterday 기준). 명시 시 YYYY-MM-DD 만 허용.
     const startDate = isValidDate(req.query?.startDate) ? req.query.startDate : '28daysAgo';
@@ -165,10 +147,17 @@ export default async function handler(req, res) {
           orderBys: [{ metric: { metricName: 'eventCount' }, desc: true }],
           limit: 10,
         },
+        // 3) 일별 사용자 추이 (활성/신규) — 추이 라인차트용
+        {
+          dateRanges,
+          dimensions: [{ name: 'date' }],
+          metrics: [{ name: 'activeUsers' }, { name: 'newUsers' }],
+          orderBys: [{ dimension: { dimensionName: 'date' } }],
+        },
       ],
     });
 
-    const [userReport, keyEventReport, topEventReport] = batch.reports || [];
+    const [userReport, keyEventReport, topEventReport, dailyReport] = batch.reports || [];
 
     const userRow = normalizeRows(userReport)[0] || {};
     const userTotals = {
@@ -187,6 +176,13 @@ export default async function handler(req, res) {
       eventName: r.eventName,
       eventCount: r.eventCount,
     }));
+
+    // 일별 추이: GA4 date 는 'YYYYMMDD' → 'YYYY-MM-DD' 로 정규화 (이미 날짜순 정렬됨)
+    const dailyUsers = normalizeRows(dailyReport).map((r) => {
+      const d = String(r.date || '');
+      const date = d.length === 8 ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : d;
+      return { date, activeUsers: r.activeUsers, newUsers: r.newUsers };
+    });
 
     // 검색어 리포트: customEvent:search_term 은 GA4 콘솔의 맞춤 측정기준 등록이 선행돼야 한다.
     // 미등록이면 API 가 에러를 반환하므로, 전체 응답이 실패하지 않도록 별도 호출 + 격리한다.
@@ -216,6 +212,7 @@ export default async function handler(req, res) {
       userTotals,
       keyEventCounts,
       topEvents,
+      dailyUsers,
       searchTerms,
       searchTermsError,
     });
