@@ -92,5 +92,45 @@ export function buildMockOverview(range) {
       ],
       error: null,
     },
+    // 인사이트(의사결정용) — 앱 계측 후 실데이터로 대체될 자리
+    insights: {
+      funnel: [
+        { stage: '설치 (first_open)', value: 940 },
+        { stage: '가입 (sign_up)', value: 512 },
+        { stage: '첫 로그인 (login)', value: 430 },
+      ],
+      searchFail: {
+        total: 640,
+        failed: 156,
+        failRate: 24.4,
+        terms: [
+          { name: '무직타이거', count: 42 },
+          { name: '망그러진곰', count: 31 },
+          { name: '쿠로미 팝업', count: 24 },
+          { name: '올리브영 콜라보', count: 19 },
+          { name: '괴발개발', count: 14 },
+        ],
+      },
+      contentConversion: [
+        { name: '가챠팝 홍대점', views: 482, bookmarks: 96, shares: 41 },
+        { name: '치이카와 카페', views: 244, bookmarks: 61, shares: 28 },
+        { name: '산리오 팝업', views: 298, bookmarks: 72, shares: 33 },
+        { name: '다이소 성수', views: 351, bookmarks: 38, shares: 12 },
+        { name: '포켓몬 스토어', views: 187, bookmarks: 21, shares: 7 },
+      ],
+      segmentRetention: [
+        { name: 'iOS', d1: 46.8, d7: 21.2, d30: 9.4 },
+        { name: 'Android', d1: 41.0, d7: 17.4, d30: 7.1 },
+        { name: '팝업', d1: 49.2, d7: 24.0, d30: 11.0 },
+        { name: '콜라보카페', d1: 43.5, d7: 18.9, d30: 8.2 },
+        { name: '전시', d1: 38.1, d7: 14.2, d30: 5.5 },
+      ],
+      wow: [
+        { metric: '활성 사용자', current: 3120, prev: 2640, deltaPct: 18.2 },
+        { metric: '신규 사용자', current: 940, prev: 1020, deltaPct: -7.8 },
+        { metric: '세션', current: 8760, prev: 7980, deltaPct: 9.8 },
+        { metric: '가입(sign_up)', current: 512, prev: 430, deltaPct: 19.1 },
+      ],
+    },
   };
 }
