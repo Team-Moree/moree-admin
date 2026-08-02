@@ -11,6 +11,8 @@ import {
   Spin,
   Empty,
   Tabs,
+  Segmented,
+  Tag,
   Typography,
 } from 'antd';
 import {
@@ -40,6 +42,7 @@ import {
 import dayjs from 'dayjs';
 import styled from 'styled-components';
 import { fetchGaOverview } from '../api/ga';
+import { buildMockOverview } from './analyticsMock'; // [MOCK] 롤백 시 이 줄 + 토글 제거
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
@@ -133,6 +136,7 @@ export default function Analytics() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [tab, setTab] = useState('overview');
+  const [mock, setMock] = useState(false); // [MOCK] 데모 데이터 토글
 
   const load = useCallback(async (r) => {
     setLoading(true);
@@ -156,9 +160,23 @@ export default function Analytics() {
     }
   }, []);
 
+  // [MOCK] 실데이터/목업 분기. 롤백 시 이 refresh 를 load 직접호출로 되돌리면 됨.
+  const refresh = useCallback(
+    (r, useMock) => {
+      if (useMock) {
+        setError(null);
+        setLoading(false);
+        setData(buildMockOverview(r));
+      } else {
+        load(r);
+      }
+    },
+    [load]
+  );
+
   useEffect(() => {
-    load(DEFAULT_RANGE);
-  }, [load]);
+    refresh(DEFAULT_RANGE, false);
+  }, [refresh]);
 
   const totals = data?.userTotals || {};
   const keyEvents = data?.keyEventCounts || {};
@@ -315,7 +333,21 @@ export default function Analytics() {
 
       <Space style={{ marginBottom: 16 }} wrap>
         <RangePicker value={range} allowClear={false} onChange={(r) => r && setRange(r)} disabledDate={(d) => d && d > dayjs().endOf('day')} />
-        <Button type="primary" icon={<ReloadOutlined />} loading={loading} onClick={() => load(range)}>조회</Button>
+        <Button type="primary" icon={<ReloadOutlined />} loading={loading} onClick={() => refresh(range, mock)}>조회</Button>
+        {/* [MOCK] 데모 토글 */}
+        <Segmented
+          value={mock ? 'mock' : 'real'}
+          onChange={(v) => {
+            const m = v === 'mock';
+            setMock(m);
+            refresh(range, m);
+          }}
+          options={[
+            { label: '실데이터', value: 'real' },
+            { label: '목업', value: 'mock' },
+          ]}
+        />
+        {mock && <Tag color="orange">목업 데이터</Tag>}
         {data?.dateRange && <Text type="secondary">{data.dateRange.startDate} ~ {data.dateRange.endDate}</Text>}
       </Space>
 
