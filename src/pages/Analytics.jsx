@@ -13,6 +13,7 @@ import {
   Tabs,
   Segmented,
   Tag,
+  Table,
   Typography,
 } from 'antd';
 import {
@@ -245,6 +246,69 @@ function DimPanel({ title, result, valueName = '건수', paramHint, chart = 'bar
 
 const EmptyCard = ({ children }) => <Empty description={children || '데이터 없음'} image={Empty.PRESENTED_IMAGE_SIMPLE} />;
 
+// ── 인사이트: 계측 대기 안내 ───────────────────────────────────────
+function PendingPanel({ hint }) {
+  return (
+    <>
+      <Alert
+        style={{ marginBottom: 12 }}
+        type="warning"
+        showIcon
+        message="아직 데이터 없음 (앱 이벤트 계측 후 표시)"
+        description={hint ? `필요 계측: ${hint}` : undefined}
+      />
+      <Empty description="계측 대기 — 목업 토글로 목표 화면 미리보기" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+    </>
+  );
+}
+
+// ── 전환 퍼널 (단계별 감소 막대 + 단계 전환율) ─────────────────────
+function Funnel({ data }) {
+  const max = Math.max(...data.map((d) => d.value), 1);
+  const first = data[0]?.value || 0;
+  return (
+    <div>
+      {data.map((d, i) => {
+        const ofFirst = first ? Math.round((d.value / first) * 100) : 0;
+        const step = i > 0 && data[i - 1].value ? Math.round((d.value / data[i - 1].value) * 100) : null;
+        return (
+          <div key={d.stage} style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 5 }}>
+              <span style={{ color: '#595959' }}>{d.stage}</span>
+              <span style={{ fontWeight: 700 }}>
+                {fmt(d.value)} <span style={{ color: '#8c8c8c', fontWeight: 400 }}>({ofFirst}%)</span>
+              </span>
+            </div>
+            <div style={{ height: 22, background: '#f0f2f5', borderRadius: 6, overflow: 'hidden' }}>
+              <div style={{ width: `${Math.max(3, (d.value / max) * 100)}%`, height: '100%', background: `linear-gradient(90deg, ${C.bar}, ${C.barTo})`, borderRadius: 6 }} />
+            </div>
+            {step != null && (
+              <div style={{ fontSize: 12, color: step < 50 ? '#eb6834' : '#8c8c8c', marginTop: 3 }}>
+                ↳ 직전 단계 대비 <b>{step}%</b> 전환
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <Text type="secondary" style={{ fontSize: 12 }}>* 이벤트 발생 수 기준(참고용). 정확한 단계별 인원은 사용자 단위 계측 후 승격.</Text>
+    </div>
+  );
+}
+
+// ── WoW 증감 카드 ──────────────────────────────────────────────────
+function WowCard({ m }) {
+  const up = m.deltaPct >= 0;
+  return (
+    <SoftCard>
+      <Statistic title={m.metric} value={m.current} groupSeparator="," valueStyle={{ fontWeight: 700 }} />
+      <div style={{ marginTop: 4, fontSize: 13, color: up ? '#0ca30c' : '#d03b3b' }}>
+        {up ? '▲' : '▼'} {Math.abs(m.deltaPct)}%{' '}
+        <span style={{ color: '#8c8c8c' }}>vs 전기간 {fmt(m.prev)}</span>
+      </div>
+    </SoftCard>
+  );
+}
+
 export default function Analytics() {
   const [range, setRange] = useState(DEFAULT_RANGE);
   const [data, setData] = useState(null);
@@ -436,6 +500,118 @@ export default function Analytics() {
     </Space>
   );
 
+  // ── 인사이트 탭 ──
+  const insights = error ? null : data?.insights;
+  const funnelData =
+    insights?.funnel || [
+      { stage: '설치 (first_open)', value: keyEvents.first_open || 0 },
+      { stage: '가입 (sign_up)', value: keyEvents.sign_up || 0 },
+      { stage: '첫 로그인 (login)', value: keyEvents.login || 0 },
+    ];
+  const InsightsTab = (
+    <Space direction="vertical" size={16} style={{ display: 'flex' }}>
+      {!insights && (
+        <Alert
+          type="info"
+          showIcon
+          message="인사이트 지표는 앱 이벤트 계측 후 채워집니다"
+          description="지금은 '가입 퍼널'만 기존 이벤트로 표시되고, 나머지는 목업 토글로 목표 화면을 확인하세요. 필요한 계측 우선순위는 docs/GA-계측-우선순위.md 참고."
+        />
+      )}
+
+      <SoftCard title="전기간 대비 증감 (WoW)" size="small">
+        {insights?.wow ? (
+          <Row gutter={[16, 16]}>
+            {insights.wow.map((m) => (
+              <Col xs={24} sm={12} lg={6} key={m.metric}>
+                <WowCard m={m} />
+              </Col>
+            ))}
+          </Row>
+        ) : (
+          <PendingPanel hint="핵심 지표 전기간 대비 (자동수집 지표는 후속으로 실데이터 연결 가능)" />
+        )}
+      </SoftCard>
+
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={12}>
+          <SoftCard title="가입 전환 퍼널" size="small">
+            <Funnel data={funnelData} />
+          </SoftCard>
+        </Col>
+        <Col xs={24} lg={12}>
+          <SoftCard title="검색 실패율 (콘텐츠 소싱 우선순위)" size="small">
+            {insights?.searchFail ? (
+              <Row gutter={16} align="middle">
+                <Col xs={24} sm={8}>
+                  <Statistic title="검색 실패율" value={insights.searchFail.failRate} suffix="%" valueStyle={{ color: '#eb6834', fontWeight: 700 }} />
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    실패 {fmt(insights.searchFail.failed)} / 전체 {fmt(insights.searchFail.total)}
+                  </Text>
+                </Col>
+                <Col xs={24} sm={16}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>결과 없는 검색어 (= 없는 행사)</Text>
+                  <HBar data={insights.searchFail.terms} nameKey="name" valueKey="count" valueName="실패 검색" gid="gFail" />
+                </Col>
+              </Row>
+            ) : (
+              <PendingPanel hint="search + has_result + search_term" />
+            )}
+          </SoftCard>
+        </Col>
+      </Row>
+
+      <SoftCard title="행사 조회 → 행동 전환 (조회 대비 북마크율)" size="small">
+        {insights?.contentConversion ? (
+          <Table
+            size="small"
+            rowKey="name"
+            pagination={false}
+            dataSource={insights.contentConversion.map((r) => ({
+              ...r,
+              cvr: r.views ? Number(((r.bookmarks / r.views) * 100).toFixed(1)) : 0,
+            }))}
+            columns={[
+              { title: '행사', dataIndex: 'name' },
+              { title: '조회', dataIndex: 'views', align: 'right', render: fmt },
+              { title: '북마크', dataIndex: 'bookmarks', align: 'right', render: fmt },
+              { title: '공유', dataIndex: 'shares', align: 'right', render: fmt },
+              {
+                title: '북마크 전환율',
+                dataIndex: 'cvr',
+                align: 'right',
+                defaultSortOrder: 'descend',
+                sorter: (a, b) => a.cvr - b.cvr,
+                render: (v) => <b style={{ color: v >= 20 ? '#0ca30c' : v < 10 ? '#eb6834' : '#595959' }}>{v}%</b>,
+              },
+            ]}
+          />
+        ) : (
+          <PendingPanel hint="view_item + add_bookmark + store_share (item_id)" />
+        )}
+      </SoftCard>
+
+      <SoftCard title="세그먼트별 재방문율 (플랫폼 / 유형)" size="small">
+        {insights?.segmentRetention ? (
+          <Table
+            size="small"
+            rowKey="name"
+            pagination={false}
+            dataSource={insights.segmentRetention}
+            columns={[
+              { title: '세그먼트', dataIndex: 'name' },
+              { title: 'D1', dataIndex: 'd1', align: 'right', render: (v) => `${v}%` },
+              { title: 'D7', dataIndex: 'd7', align: 'right', render: (v) => `${v}%` },
+              { title: 'D30', dataIndex: 'd30', align: 'right', render: (v) => `${v}%` },
+            ]}
+          />
+        ) : (
+          <PendingPanel hint="platform / event_type / location 세그먼트 + 재방문 코호트" />
+        )}
+      </SoftCard>
+    </Space>
+  );
+
   return (
     <div>
       <PageTitle>GA 분석</PageTitle>
@@ -485,6 +661,7 @@ export default function Analytics() {
             { key: 'overview', label: '개요', children: OverviewTab },
             { key: 'events', label: '이벤트', children: EventsTab },
             { key: 'content', label: '행사·검색', children: ContentTab },
+            { key: 'insights', label: '인사이트', children: InsightsTab },
           ]}
         />
       </Spin>
