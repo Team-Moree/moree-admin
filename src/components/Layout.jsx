@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Layout as AntLayout, Menu, Button, theme } from 'antd';
 import {
   DashboardOutlined,
+  BarChartOutlined,
   TagsOutlined,
   AimOutlined,
   ShopOutlined,
@@ -51,6 +52,7 @@ const StyledContent = styled(Content)`
 
 const menuItems = [
   { key: '/', icon: <DashboardOutlined />, label: '대시보드' },
+  { key: '/analytics', icon: <BarChartOutlined />, label: 'GA 분석' },
   { key: '/fandom-categories', icon: <TagsOutlined />, label: '팬덤 카테고리' },
   { key: '/fandom-targets', icon: <AimOutlined />, label: '팬덤 타겟' },
   { key: '/stores', icon: <ShopOutlined />, label: '스토어' },
