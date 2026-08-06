@@ -226,7 +226,7 @@ const LINK_TYPE_OPTIONS = [
   { value: 'HOMEPAGE', label: '홈페이지' },
   { value: 'PRE_RESERVATION', label: '사전예약' },
   { value: 'INSTAGRAM', label: '인스타그램' },
-  { value: 'TWITTER', label: '트위터' },
+  { value: 'X', label: 'X' },
   { value: 'COMMUNITY', label: '커뮤니티' },
   { value: 'OPEN_CHAT', label: '오픈채팅' },
 ];
