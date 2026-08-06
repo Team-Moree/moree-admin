@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Image, Spin, Popconfirm, Alert, Input, Form, DatePicker, Upload, Switch, Segmented } from 'antd';
-import { CloseOutlined, EditOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
+import { CloseOutlined, DeleteOutlined, EditOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import dayjs from 'dayjs';
 import client from '../api/client';
@@ -32,6 +32,14 @@ const StyledTable = styled(Table)`
 
   .pending-review-row > td:first-child {
     box-shadow: inset 4px 0 0 #faad14;
+  }
+
+  .hidden-store-row > td {
+    opacity: 0.5;
+  }
+
+  .hidden-store-row:hover > td {
+    opacity: 0.75;
   }
 `;
 
@@ -506,6 +514,7 @@ export default function Stores() {
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [statusUpdatingId, setStatusUpdatingId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   const [pendingNextStatus, setPendingNextStatus] = useState(null);
   const [pendingHasGacha, setPendingHasGacha] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -615,15 +624,35 @@ export default function Stores() {
           </Button>
         </Popconfirm>
       </Space>
-      <Button
-        key="close"
-        onClick={() => {
-          setDetail(null);
-          setPendingNextStatus(null);
-        }}
-      >
-        닫기
-      </Button>
+      <Space>
+        <Popconfirm
+          key="delete"
+          title="이 스토어를 삭제할까요?"
+          description="사용자 앱에서 사라집니다. 완전 삭제는 아니라 되돌릴 수 있어요."
+          okText="삭제"
+          okButtonProps={{ danger: true }}
+          cancelText="취소"
+          onConfirm={() => handleDelete(detail.storeId)}
+        >
+          <Button
+            danger
+            icon={<DeleteOutlined />}
+            disabled={detail?.approvalStatus === 'HIDDEN'}
+            loading={deletingId === detail?.storeId}
+          >
+            삭제
+          </Button>
+        </Popconfirm>
+        <Button
+          key="close"
+          onClick={() => {
+            setDetail(null);
+            setPendingNextStatus(null);
+          }}
+        >
+          닫기
+        </Button>
+      </Space>
     </ModalFooter>
   );
 
@@ -1108,6 +1137,33 @@ export default function Stores() {
     }
   };
 
+  const handleDelete = async (storeId) => {
+    setDeletingId(storeId);
+    try {
+      await client.delete(`/admin/store/${storeId}`);
+
+      notification.success({
+        message: '삭제 완료',
+        description: '스토어가 삭제(숨김) 처리되었습니다.',
+      });
+
+      setData((prev) => prev.map((item) => (
+        item.storeId === storeId ? { ...item, approvalStatus: 'HIDDEN' } : item
+      )));
+
+      setDetail((prev) => (prev && prev.storeId === storeId
+        ? { ...prev, approvalStatus: 'HIDDEN' }
+        : prev));
+
+      setPendingNextStatus(null);
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || '스토어 삭제 실패';
+      notification.error({ message: '삭제 실패', description: msg });
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const columns = [
     {
       title: 'ID',
@@ -1218,9 +1274,12 @@ export default function Stores() {
         dataSource={data}
         rowKey="storeId"
         loading={loading}
-        rowClassName={(record) => (
-          isAllStatusView && record.approvalStatus === 'PENDING' ? 'pending-review-row' : ''
-        )}
+        rowClassName={(record) => {
+          if (!isAllStatusView) return '';
+          if (record.approvalStatus === 'PENDING') return 'pending-review-row';
+          if (record.approvalStatus === 'HIDDEN') return 'hidden-store-row';
+          return '';
+        }}
         pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => `총 ${total}건` }}
         size="middle"
         footer={() =>
