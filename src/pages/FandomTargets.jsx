@@ -22,6 +22,16 @@ const STATUS_MAP = {
   REJECTED: { color: 'red', label: '거절' },
 };
 
+// 덕질 대상 유형. WORK(작품)는 캐릭터/인물의 source가 독립된 대상으로 승격된 것이고,
+// CHARACTER는 작품에 속한 개별 대상(캐릭터·인물)이다.
+const TYPE_MAP = {
+  WORK: { color: 'geekblue', label: '작품' },
+  CHARACTER: { color: 'default', label: '캐릭터' },
+};
+
+// 구버전 응답(type 미포함) 호환: 값이 없으면 개별 대상(CHARACTER)으로 간주한다.
+const targetTypeOf = (record) => record?.type || 'CHARACTER';
+
 const CATEGORY_COLORS = {
   CHARACTER: 'magenta',
   IDOL: 'purple',
@@ -39,6 +49,7 @@ export default function FandomTargets() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(undefined);
+  const [typeFilter, setTypeFilter] = useState(undefined);
   const [error, setError] = useState(null);
 
   // 수정 모달
@@ -66,8 +77,9 @@ export default function FandomTargets() {
   };
 
   // 커서 페이지네이션으로 전체 목록을 끝까지 조회한다.
-  // (어드민 조회 API는 next 커서만 지원하고 search 파라미터는 서버에서 무시하므로,
-  //  이름 검색은 전체 조회 후 클라이언트에서 필터링한다.)
+  // (어드민 조회 API는 status/next만 지원하고 search·type 파라미터는 없으므로,
+  //  이름·소스 검색과 유형 필터는 전체 조회 후 클라이언트에서 처리한다.)
+  // 서버는 작품(WORK)을 앞에, 그 뒤로 id 오름차순으로 반환하며 이 순서를 그대로 유지한다.
   const fetchData = useCallback(async (status = undefined) => {
     setLoading(true);
     setError(null);
@@ -108,12 +120,25 @@ export default function FandomTargets() {
     fetchData(value);
   };
 
-  // 이름 검색은 전체 조회된 데이터에 대해 클라이언트에서 필터링
+  // 검색은 서버 검색과 동일하게 이름과 소스를 모두 대상으로 하고, 유형 필터를 함께 적용한다.
   const filteredData = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    if (!keyword) return data;
-    return data.filter((item) => (item.name || '').toLowerCase().includes(keyword));
-  }, [data, search]);
+    return data.filter((item) => {
+      if (typeFilter && targetTypeOf(item) !== typeFilter) return false;
+      if (!keyword) return true;
+      return `${item.name || ''} ${item.source || ''}`.toLowerCase().includes(keyword);
+    });
+  }, [data, search, typeFilter]);
+
+  // 유형별 건수 (작품 승격으로 늘어난 대상 규모를 헤더에서 바로 확인)
+  const typeCounts = useMemo(
+    () => data.reduce((acc, item) => {
+      const type = targetTypeOf(item);
+      acc[type] = (acc[type] || 0) + 1;
+      return acc;
+    }, {}),
+    [data],
+  );
 
   const openEditModal = (record) => {
     setEditTarget(record);
@@ -126,13 +151,16 @@ export default function FandomTargets() {
 
   const handleSave = async () => {
     if (!editTarget) return;
+    // 작품(WORK)은 그 자체가 소스이므로 소스를 전송하지 않는다.
+    // (소스를 보내면 서버가 그 이름으로 또 다른 작품 대상을 만들어버린다.)
+    const isWork = targetTypeOf(editTarget) === 'WORK';
     setSaving(true);
     try {
       // 이름/이미지/상태 변경 (변경된 필드만 전송)
       const patchBody = {};
       if (editName !== editTarget.name) patchBody.name = editName;
       if (editImageUrl !== (editTarget.imageUrl || '')) patchBody.imageUrl = editImageUrl;
-      if (editSource !== (editTarget.source || '')) patchBody.source = editSource;
+      if (!isWork && editSource !== (editTarget.source || '')) patchBody.source = editSource;
       if (editStatus !== editTarget.status) patchBody.status = editStatus;
 
       if (Object.keys(patchBody).length > 0) {
@@ -147,7 +175,12 @@ export default function FandomTargets() {
           fandomCategoryIds: editCategoryIds,
         });
       }
-      notification.success({ message: '수정 완료', description: '덕질 대상이 수정되었습니다.' });
+      notification.success({
+        message: '수정 완료',
+        description: patchBody.source
+          ? '덕질 대상이 수정되었습니다. 소스와 같은 이름의 작품 대상도 함께 생성·보강되었습니다.'
+          : '덕질 대상이 수정되었습니다.',
+      });
       setEditTarget(null);
       fetchData(statusFilter);
     } catch (err) {
@@ -164,6 +197,19 @@ export default function FandomTargets() {
       dataIndex: 'fandomTargetId',
       key: 'fandomTargetId',
       width: 80,
+      // 기본 정렬은 서버 순서(작품 우선)라서, ID 순으로 보고 싶을 때 직접 정렬할 수 있게 한다.
+      sorter: (a, b) => a.fandomTargetId - b.fandomTargetId,
+    },
+    {
+      title: '유형',
+      dataIndex: 'type',
+      key: 'type',
+      width: 90,
+      render: (_, record) => {
+        const type = targetTypeOf(record);
+        const t = TYPE_MAP[type] || { color: 'default', label: type };
+        return <Tag color={t.color}>{t.label}</Tag>;
+      },
     },
     {
       title: '이미지',
@@ -194,8 +240,15 @@ export default function FandomTargets() {
       key: 'source',
       width: 220,
       ellipsis: true,
-      render: (src) => {
-        if (!src) return <Typography.Text type="secondary">-</Typography.Text>;
+      render: (src, record) => {
+        // 작품(WORK)은 스스로가 소스라서 소스 값을 갖지 않는다.
+        if (!src) {
+          return (
+            <Typography.Text type="secondary">
+              {targetTypeOf(record) === 'WORK' ? '작품 자체' : '-'}
+            </Typography.Text>
+          );
+        }
         const isUrl = /^https?:\/\//i.test(src);
         return isUrl ? (
           <Typography.Link href={src} target="_blank" rel="noreferrer" ellipsis>
@@ -248,11 +301,30 @@ export default function FandomTargets() {
     );
   }
 
+  const editingType = editTarget ? targetTypeOf(editTarget) : null;
+  const editingIsWork = editingType === 'WORK';
+
   return (
     <div>
       <Header>
-        <Typography.Title level={4} style={{ margin: 0 }}>덕질 대상 관리</Typography.Title>
+        <Space align="baseline" wrap>
+          <Typography.Title level={4} style={{ margin: 0 }}>덕질 대상 관리</Typography.Title>
+          <Typography.Text type="secondary">
+            {`작품 ${typeCounts.WORK || 0} · 캐릭터 ${typeCounts.CHARACTER || 0}`}
+          </Typography.Text>
+        </Space>
         <Space wrap>
+          <Select
+            placeholder="유형 필터"
+            allowClear
+            value={typeFilter}
+            onChange={setTypeFilter}
+            style={{ width: 140 }}
+            options={[
+              { value: 'WORK', label: '작품' },
+              { value: 'CHARACTER', label: '캐릭터' },
+            ]}
+          />
           <Select
             placeholder="상태 필터"
             allowClear
@@ -266,7 +338,7 @@ export default function FandomTargets() {
             ]}
           />
           <Input.Search
-            placeholder="이름 검색..."
+            placeholder="이름·소스 검색..."
             prefix={<SearchOutlined />}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -301,6 +373,11 @@ export default function FandomTargets() {
           <div>
             <Descriptions bordered column={1} size="small" style={{ marginBottom: 24 }}>
               <Descriptions.Item label="ID">{editTarget.fandomTargetId}</Descriptions.Item>
+              <Descriptions.Item label="유형">
+                <Tag color={(TYPE_MAP[editingType] || {}).color || 'default'}>
+                  {(TYPE_MAP[editingType] || {}).label || editingType}
+                </Tag>
+              </Descriptions.Item>
               <Descriptions.Item label="현재 이미지">
                 {editTarget.imageUrl ? (
                   <Avatar src={editTarget.imageUrl} shape="square" size={64} />
@@ -325,13 +402,19 @@ export default function FandomTargets() {
                   placeholder="https://..."
                 />
               </Form.Item>
-              <Form.Item label="소스">
+              <Form.Item
+                label="소스"
+                extra={editingIsWork
+                  ? '작품은 그 자체가 소스이므로 소스를 지정하지 않습니다.'
+                  : '소스를 저장하면 같은 이름의 작품 대상이 자동으로 생성·보강되고, 이 대상의 카테고리를 물려받습니다.'}
+              >
                 <Input.TextArea
-                  value={editSource}
+                  value={editingIsWork ? '' : editSource}
                   onChange={(e) => setEditSource(e.target.value)}
-                  placeholder="출처(원작/URL 등)"
+                  disabled={editingIsWork}
+                  placeholder={editingIsWork ? '작품에는 소스를 지정하지 않습니다' : '출처(원작/URL 등)'}
                   maxLength={500}
-                  showCount
+                  showCount={!editingIsWork}
                   autoSize={{ minRows: 1, maxRows: 4 }}
                 />
               </Form.Item>
