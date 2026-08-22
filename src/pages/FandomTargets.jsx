@@ -22,8 +22,8 @@ const STATUS_MAP = {
   REJECTED: { color: 'red', label: '거절' },
 };
 
-// 덕질 대상 유형. WORK(작품)는 캐릭터/인물의 source가 독립된 대상으로 승격된 것이고,
-// CHARACTER는 작품에 속한 개별 대상(캐릭터·인물)이다.
+// 덕질 대상 유형. WORK(작품)는 작품 그 자체가 하나의 덕질 대상인 것이고,
+// CHARACTER는 작품에 속한 개별 대상(캐릭터·인물)이다. 유형은 저장할 때 명시적으로 지정한다.
 const TYPE_MAP = {
   WORK: { color: 'geekblue', label: '작품' },
   CHARACTER: { color: 'default', label: '캐릭터' },
@@ -59,6 +59,7 @@ export default function FandomTargets() {
   const [editImageUrl, setEditImageUrl] = useState('');
   const [editSource, setEditSource] = useState('');
   const [editStatus, setEditStatus] = useState(null);
+  const [editType, setEditType] = useState('CHARACTER');
   const [editCategoryIds, setEditCategoryIds] = useState([]);
   const [saving, setSaving] = useState(false);
 
@@ -168,21 +169,27 @@ export default function FandomTargets() {
     setEditImageUrl(record.imageUrl || '');
     setEditSource(record.source || '');
     setEditStatus(record.status);
+    setEditType(targetTypeOf(record));
     setEditCategoryIds(record.fandomCategories?.map((c) => c.fandomCategoryId) || []);
   };
 
   const handleSave = async () => {
     if (!editTarget) return;
-    // 작품(WORK)은 그 자체가 소스이므로 소스를 전송하지 않는다.
-    // (소스를 보내면 서버가 그 이름으로 또 다른 작품 대상을 만들어버린다.)
-    const isWork = targetTypeOf(editTarget) === 'WORK';
+    // 작품(WORK)은 그 자체가 소스라 소스를 갖지 않는다.
+    const isWork = editType === 'WORK';
     setSaving(true);
     try {
-      // 이름/이미지/상태 변경 (변경된 필드만 전송)
+      // 변경된 필드만 전송한다. 유형(type)은 서버가 자동으로 정하지 않으므로 여기서 명시적으로 보낸다.
       const patchBody = {};
       if (editName !== editTarget.name) patchBody.name = editName;
       if (editImageUrl !== (editTarget.imageUrl || '')) patchBody.imageUrl = editImageUrl;
-      if (!isWork && editSource !== (editTarget.source || '')) patchBody.source = editSource;
+      if (editType !== targetTypeOf(editTarget)) patchBody.type = editType;
+      if (isWork) {
+        // 캐릭터를 작품으로 바꾸면 남아 있던 소스를 비운다.
+        if (editTarget.source) patchBody.source = '';
+      } else if (editSource !== (editTarget.source || '')) {
+        patchBody.source = editSource;
+      }
       if (editStatus !== editTarget.status) patchBody.status = editStatus;
 
       if (Object.keys(patchBody).length > 0) {
@@ -199,9 +206,7 @@ export default function FandomTargets() {
       }
       notification.success({
         message: '수정 완료',
-        description: patchBody.source
-          ? '덕질 대상이 수정되었습니다. 소스와 같은 이름의 작품 대상도 함께 생성·보강되었습니다.'
-          : '덕질 대상이 수정되었습니다.',
+        description: '덕질 대상이 수정되었습니다.',
       });
       setEditTarget(null);
       reload();
@@ -323,8 +328,8 @@ export default function FandomTargets() {
     );
   }
 
-  const editingType = editTarget ? targetTypeOf(editTarget) : null;
-  const editingIsWork = editingType === 'WORK';
+  // 화면 표시는 '편집 중인 유형' 기준이다. 유형을 바꾸면 소스 입력 가능 여부도 즉시 따라간다.
+  const editingIsWork = editType === 'WORK';
 
   return (
     <div>
@@ -401,11 +406,6 @@ export default function FandomTargets() {
           <div>
             <Descriptions bordered column={1} size="small" style={{ marginBottom: 24 }}>
               <Descriptions.Item label="ID">{editTarget.fandomTargetId}</Descriptions.Item>
-              <Descriptions.Item label="유형">
-                <Tag color={(TYPE_MAP[editingType] || {}).color || 'default'}>
-                  {(TYPE_MAP[editingType] || {}).label || editingType}
-                </Tag>
-              </Descriptions.Item>
               <Descriptions.Item label="현재 이미지">
                 {editTarget.imageUrl ? (
                   <Avatar src={editTarget.imageUrl} shape="square" size={64} />
@@ -416,6 +416,20 @@ export default function FandomTargets() {
             </Descriptions>
 
             <Form layout="vertical">
+              <Form.Item
+                label="유형"
+                extra="작품은 자동으로 만들어지지 않습니다. 작품으로 지정하면 소스는 비워집니다."
+              >
+                <Select
+                  value={editType}
+                  onChange={setEditType}
+                  style={{ width: '100%' }}
+                  options={Object.entries(TYPE_MAP).map(([value, { color, label }]) => ({
+                    value,
+                    label: <Tag color={color}>{label}</Tag>,
+                  }))}
+                />
+              </Form.Item>
               <Form.Item label="이름">
                 <Input
                   value={editName}
@@ -434,7 +448,7 @@ export default function FandomTargets() {
                 label="소스"
                 extra={editingIsWork
                   ? '작품은 그 자체가 소스이므로 소스를 지정하지 않습니다.'
-                  : '소스를 저장하면 같은 이름의 작품 대상이 자동으로 생성·보강되고, 이 대상의 카테고리를 물려받습니다.'}
+                  : '소속 작품 이름. 여기에 적어도 그 이름의 작품 대상이 따로 생기지는 않습니다.'}
               >
                 <Input.TextArea
                   value={editingIsWork ? '' : editSource}
