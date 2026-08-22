@@ -50,7 +50,6 @@ export default function FandomTargets() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(undefined);
   const [typeFilter, setTypeFilter] = useState(undefined);
-  const [workFilter, setWorkFilter] = useState('');
   const [noWorkOnly, setNoWorkOnly] = useState(false);
   const [error, setError] = useState(null);
 
@@ -79,7 +78,7 @@ export default function FandomTargets() {
   };
 
   // 커서 페이지네이션으로 목록을 끝까지 조회한다.
-  // 상태·유형·작품 필터는 서버가 처리하므로 그대로 넘긴다. 어드민 조회 API 에 검색 파라미터는
+  // 상태·유형 필터는 서버가 처리하므로 그대로 넘긴다. 어드민 조회 API 에 검색 파라미터는
   // 없으므로 이름·소스 검색만 받아온 뒤 클라이언트에서 거른다.
   // 서버는 작품(WORK)을 앞에, 그 뒤로 id 오름차순으로 반환하며 이 순서를 그대로 유지한다.
   const fetchData = useCallback(async (filters = {}) => {
@@ -94,7 +93,6 @@ export default function FandomTargets() {
         const params = { next, size: PAGE_SIZE };
         if (filters.status) params.status = filters.status;
         if (filters.type) params.type = filters.type;
-        if (filters.work) params.work = filters.work;
         // 소속 작품이 없는 대상만 보기 — 미분류 정리용이라 어드민 조회에만 있는 필터다.
         if (filters.noWork) params.noWork = true;
         const res = await client.get('/admin/fandom-target', { params });
@@ -125,7 +123,6 @@ export default function FandomTargets() {
   const reload = (override = {}) => fetchData({
     status: statusFilter,
     type: typeFilter,
-    work: workFilter.trim() || undefined,
     noWork: noWorkOnly,
     ...override,
   });
@@ -140,18 +137,12 @@ export default function FandomTargets() {
     reload({ type: value });
   };
 
-  const handleWorkFilter = (value) => {
-    const work = (value || '').trim();
-    setWorkFilter(work);
-    reload({ work: work || undefined });
-  };
-
   const handleNoWorkOnly = (checked) => {
     setNoWorkOnly(checked);
     reload({ noWork: checked });
   };
 
-  // 유형·작품 필터는 서버에서 이미 적용됐으므로, 여기서는 검색어만 거른다.
+  // 유형 필터는 서버에서 이미 적용됐으므로, 여기서는 검색어만 거른다.
   // 검색은 서버 검색과 동일하게 이름과 소스를 모두 대상으로 한다.
   const filteredData = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -355,15 +346,6 @@ export default function FandomTargets() {
               { value: 'WORK', label: '작품' },
               { value: 'CHARACTER', label: '캐릭터' },
             ]}
-          />
-          <Input.Search
-            placeholder="작품으로 조회..."
-            value={workFilter}
-            onChange={(e) => setWorkFilter(e.target.value)}
-            onSearch={handleWorkFilter}
-            style={{ width: 200 }}
-            allowClear
-            disabled={noWorkOnly}
           />
           <Checkbox
             checked={noWorkOnly}
