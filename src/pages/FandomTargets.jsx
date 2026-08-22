@@ -50,6 +50,7 @@ export default function FandomTargets() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(undefined);
   const [typeFilter, setTypeFilter] = useState(undefined);
+  const [noWorkOnly, setNoWorkOnly] = useState(false);
   const [error, setError] = useState(null);
 
   // 수정 모달
@@ -76,11 +77,11 @@ export default function FandomTargets() {
     }
   };
 
-  // 커서 페이지네이션으로 전체 목록을 끝까지 조회한다.
-  // (어드민 조회 API는 status/next만 지원하고 search·type 파라미터는 없으므로,
-  //  이름·소스 검색과 유형 필터는 전체 조회 후 클라이언트에서 처리한다.)
+  // 커서 페이지네이션으로 목록을 끝까지 조회한다.
+  // 상태·유형 필터는 서버가 처리하므로 그대로 넘긴다. 어드민 조회 API 에 검색 파라미터는
+  // 없으므로 이름·소스 검색만 받아온 뒤 클라이언트에서 거른다.
   // 서버는 작품(WORK)을 앞에, 그 뒤로 id 오름차순으로 반환하며 이 순서를 그대로 유지한다.
-  const fetchData = useCallback(async (status = undefined) => {
+  const fetchData = useCallback(async (filters = {}) => {
     setLoading(true);
     setError(null);
     try {
@@ -90,7 +91,10 @@ export default function FandomTargets() {
       let next = '';
       for (let page = 0; page < MAX_PAGES; page += 1) {
         const params = { next, size: PAGE_SIZE };
-        if (status) params.status = status;
+        if (filters.status) params.status = filters.status;
+        if (filters.type) params.type = filters.type;
+        // 소속 작품이 없는 대상만 보기 — 미분류 정리용이라 어드민 조회에만 있는 필터다.
+        if (filters.noWork) params.noWork = true;
         const res = await client.get('/admin/fandom-target', { params });
         const list = Array.isArray(res.data?.results)
           ? res.data.results
@@ -115,16 +119,34 @@ export default function FandomTargets() {
     fetchCategories();
   }, []);
 
+  // 필터가 바뀌면 서버에서 다시 받아온다. setState 는 비동기라 바뀐 값을 직접 넘긴다.
+  const reload = (override = {}) => fetchData({
+    status: statusFilter,
+    type: typeFilter,
+    noWork: noWorkOnly,
+    ...override,
+  });
+
   const handleStatusFilter = (value) => {
     setStatusFilter(value);
-    fetchData(value);
+    reload({ status: value });
   };
 
-  // 검색은 서버 검색과 동일하게 이름과 소스를 모두 대상으로 하고, 유형 필터를 함께 적용한다.
+  const handleTypeFilter = (value) => {
+    setTypeFilter(value);
+    reload({ type: value });
+  };
+
+  const handleNoWorkOnly = (checked) => {
+    setNoWorkOnly(checked);
+    reload({ noWork: checked });
+  };
+
+  // 유형 필터는 서버에서 이미 적용됐으므로, 여기서는 검색어만 거른다.
+  // 검색은 서버 검색과 동일하게 이름과 소스를 모두 대상으로 한다.
   const filteredData = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     return data.filter((item) => {
-      if (typeFilter && targetTypeOf(item) !== typeFilter) return false;
       if (!keyword) return true;
       return `${item.name || ''} ${item.source || ''}`.toLowerCase().includes(keyword);
     });
@@ -182,7 +204,7 @@ export default function FandomTargets() {
           : '덕질 대상이 수정되었습니다.',
       });
       setEditTarget(null);
-      fetchData(statusFilter);
+      reload();
     } catch (err) {
       const msg = err.response?.data?.message || err.message || '수정 실패';
       notification.error({ message: '수정 실패', description: msg });
@@ -295,7 +317,7 @@ export default function FandomTargets() {
           status="warning"
           title="데이터를 불러올 수 없습니다"
           subTitle={error}
-          extra={<Button type="primary" onClick={() => fetchData(statusFilter)}>다시 시도</Button>}
+          extra={<Button type="primary" onClick={() => reload()}>다시 시도</Button>}
         />
       </div>
     );
@@ -310,7 +332,7 @@ export default function FandomTargets() {
         <Space align="baseline" wrap>
           <Typography.Title level={4} style={{ margin: 0 }}>덕질 대상 관리</Typography.Title>
           <Typography.Text type="secondary">
-            {`작품 ${typeCounts.WORK || 0} · 캐릭터 ${typeCounts.CHARACTER || 0}`}
+            {`조회된 ${data.length}건 — 작품 ${typeCounts.WORK || 0} · 캐릭터 ${typeCounts.CHARACTER || 0}`}
           </Typography.Text>
         </Space>
         <Space wrap>
@@ -318,13 +340,19 @@ export default function FandomTargets() {
             placeholder="유형 필터"
             allowClear
             value={typeFilter}
-            onChange={setTypeFilter}
+            onChange={handleTypeFilter}
             style={{ width: 140 }}
             options={[
               { value: 'WORK', label: '작품' },
               { value: 'CHARACTER', label: '캐릭터' },
             ]}
           />
+          <Checkbox
+            checked={noWorkOnly}
+            onChange={(e) => handleNoWorkOnly(e.target.checked)}
+          >
+            작품 없는 대상만
+          </Checkbox>
           <Select
             placeholder="상태 필터"
             allowClear
