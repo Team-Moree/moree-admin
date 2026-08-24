@@ -4,6 +4,7 @@ import { CloseOutlined, DeleteOutlined, EditOutlined, HolderOutlined, PlusOutlin
 import styled from 'styled-components';
 import dayjs from 'dayjs';
 import client from '../api/client';
+import GoogleAddressSearchModal from '../components/GoogleAddressSearchModal';
 
 const Header = styled.div`
   display: flex;
@@ -239,8 +240,6 @@ const CATEGORY_COLORS = {
 const PAGE_SIZE = 50;
 const ALL_STATUS = 'ALL';
 const STORE_CREATE_ENDPOINT = '/admin/store';
-const DAUM_POSTCODE_SCRIPT_URL = 'https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
-const NAVER_MAPS_SERVICE_WAIT_MS = 5000;
 const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
 const KOREAN_WEEKDAYS_BY_DAY_INDEX = ['일', '월', '화', '수', '목', '금', '토'];
 const dateToKoreanWeekday = (date) => KOREAN_WEEKDAYS_BY_DAY_INDEX[dayjs(date).day()];
@@ -275,85 +274,6 @@ const normalizeKeywords = (keywords) => {
   }
 
   return [];
-};
-
-let daumPostcodeScriptPromise;
-let naverMapsScriptPromise;
-
-const loadExternalScript = (src) => new Promise((resolve, reject) => {
-  const existingScript = document.querySelector(`script[src="${src}"]`);
-  if (existingScript) {
-    existingScript.addEventListener('load', resolve, { once: true });
-    existingScript.addEventListener('error', reject, { once: true });
-    if (existingScript.dataset.loaded === 'true') resolve();
-    return;
-  }
-
-  const script = document.createElement('script');
-  script.src = src;
-  script.async = true;
-  script.onload = () => {
-    script.dataset.loaded = 'true';
-    resolve();
-  };
-  script.onerror = reject;
-  document.head.appendChild(script);
-});
-
-const loadDaumPostcode = async () => {
-  if (window.daum?.Postcode) return;
-  daumPostcodeScriptPromise ||= loadExternalScript(DAUM_POSTCODE_SCRIPT_URL);
-  await daumPostcodeScriptPromise;
-};
-
-const getNaverMapsScriptUrl = (clientId) =>
-  `https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${encodeURIComponent(clientId)}&submodules=geocoder`;
-
-const waitForNaverMapsService = () => new Promise((resolve, reject) => {
-  const startedAt = Date.now();
-
-  const checkService = () => {
-    if (window.naver?.maps?.Service) {
-      resolve();
-      return;
-    }
-
-    if (Date.now() - startedAt >= NAVER_MAPS_SERVICE_WAIT_MS) {
-      reject(new Error('NAVER Maps Geocoder를 사용할 수 없습니다. 키, 허용 도메인, Geocoding API 설정을 확인하세요.'));
-      return;
-    }
-
-    window.setTimeout(checkService, 100);
-  };
-
-  checkService();
-});
-
-const loadNaverMaps = async (clientId) => {
-  if (window.naver?.maps?.Service) return;
-  naverMapsScriptPromise ||= loadExternalScript(getNaverMapsScriptUrl(clientId));
-  await naverMapsScriptPromise;
-  await waitForNaverMapsService();
-};
-
-const geocodeAddress = async (address, clientId) => {
-  await loadNaverMaps(clientId);
-
-  return new Promise((resolve, reject) => {
-    window.naver.maps.Service.geocode({ query: address }, (status, response) => {
-      const addressResult = response?.v2?.addresses?.[0];
-
-      if (status !== window.naver.maps.Service.Status.OK || !addressResult) {
-        reject(new Error('주소 좌표를 찾을 수 없습니다.'));
-        return;
-      }
-
-      resolve({
-        latitude: Number(addressResult.y),
-        longitude: Number(addressResult.x),
-      });
-    });
-  });
 };
 
 const normalizeText = (value) => (typeof value === 'string' ? value.trim() : value);
@@ -594,13 +514,13 @@ export default function Stores() {
   const createDragIndexRef = useRef(null);
   const editDragIndexRef = useRef(null);
   const [categories, setCategories] = useState([]);
-  const [addressSearching, setAddressSearching] = useState(false);
+  const [addressModalOpen, setAddressModalOpen] = useState(false);
   const [useCustomOperationHours, setUseCustomOperationHours] = useState(false);
   const [createExcludedOperationDays, setCreateExcludedOperationDays] = useState([]);
   const [createOperationMode, setCreateOperationMode] = useState('common');
   const [editOpen, setEditOpen] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
-  const [editAddressSearching, setEditAddressSearching] = useState(false);
+  const [editAddressModalOpen, setEditAddressModalOpen] = useState(false);
   const [useCustomEditOperationHours, setUseCustomEditOperationHours] = useState(false);
   const [editExcludedOperationDays, setEditExcludedOperationDays] = useState([]);
   const { notification } = App.useApp();
@@ -861,116 +781,22 @@ export default function Stores() {
     setCreateOpen(true);
   };
 
-  const handleAddressSearch = async () => {
-    const naverMapKey = import.meta.env.VITE_NAVER_MAP_KEY;
-
-    if (!naverMapKey) {
-      notification.error({
-        message: '주소 검색 설정 필요',
-        description: 'VITE_NAVER_MAP_KEY를 설정해야 주소 좌표를 확정할 수 있습니다.',
-      });
-      return;
-    }
-
-    setAddressSearching(true);
-    try {
-      await loadDaumPostcode();
-      new window.daum.Postcode({
-        oncomplete: async (data) => {
-          setAddressSearching(true);
-          const selectedAddress = data.roadAddress || data.jibunAddress || data.address;
-          if (!selectedAddress) {
-            notification.error({ message: '주소 선택 실패', description: '선택한 주소를 읽을 수 없습니다.' });
-            setAddressSearching(false);
-            return;
-          }
-
-          try {
-            const coordinates = await geocodeAddress(selectedAddress, naverMapKey);
-            createForm.setFieldsValue({
-              address: selectedAddress,
-              addressDetail: '',
-              zip: data.zonecode || '',
-              latitude: coordinates.latitude,
-              longitude: coordinates.longitude,
-            });
-            notification.success({ message: '주소 반영 완료', description: '주소와 좌표가 함께 반영되었습니다.' });
-          } catch (err) {
-            notification.error({
-              message: '좌표 조회 실패',
-              description: err.message || '선택한 주소의 좌표를 찾을 수 없습니다.',
-            });
-          } finally {
-            setAddressSearching(false);
-          }
-        },
-        onclose: () => {
-          setAddressSearching(false);
-        },
-      }).open();
-    } catch (err) {
-      notification.error({
-        message: '주소 검색 실패',
-        description: err.message || '주소 검색 스크립트를 불러오지 못했습니다.',
-      });
-      setAddressSearching(false);
-    }
+  const handleAddressSearch = () => {
+    setAddressModalOpen(true);
   };
 
-  const handleEditAddressSearch = async () => {
-    const naverMapKey = import.meta.env.VITE_NAVER_MAP_KEY;
+  const handleAddressSelect = ({ address, zip, latitude, longitude }) => {
+    createForm.setFieldsValue({ address, addressDetail: '', zip, latitude, longitude });
+    notification.success({ message: '주소 반영 완료', description: '주소와 좌표가 함께 반영되었습니다.' });
+  };
 
-    if (!naverMapKey) {
-      notification.error({
-        message: '주소 검색 설정 필요',
-        description: 'VITE_NAVER_MAP_KEY를 설정해야 주소 좌표를 확정할 수 있습니다.',
-      });
-      return;
-    }
+  const handleEditAddressSearch = () => {
+    setEditAddressModalOpen(true);
+  };
 
-    setEditAddressSearching(true);
-    try {
-      await loadDaumPostcode();
-      new window.daum.Postcode({
-        oncomplete: async (data) => {
-          setEditAddressSearching(true);
-          const selectedAddress = data.roadAddress || data.jibunAddress || data.address;
-          if (!selectedAddress) {
-            notification.error({ message: '주소 선택 실패', description: '선택한 주소를 읽을 수 없습니다.' });
-            setEditAddressSearching(false);
-            return;
-          }
-
-          try {
-            const coordinates = await geocodeAddress(selectedAddress, naverMapKey);
-            editForm.setFieldsValue({
-              address: selectedAddress,
-              addressDetail: '',
-              zip: data.zonecode || '',
-              latitude: coordinates.latitude,
-              longitude: coordinates.longitude,
-            });
-            notification.success({ message: '주소 반영 완료', description: '주소와 좌표가 함께 반영되었습니다.' });
-          } catch (err) {
-            notification.error({
-              message: '좌표 조회 실패',
-              description: err.message || '선택한 주소의 좌표를 찾을 수 없습니다.',
-            });
-          } finally {
-            setEditAddressSearching(false);
-          }
-        },
-        onclose: () => {
-          setEditAddressSearching(false);
-        },
-      }).open();
-    } catch (err) {
-      notification.error({
-        message: '주소 검색 실패',
-        description: err.message || '주소 검색 스크립트를 불러오지 못했습니다.',
-      });
-      setEditAddressSearching(false);
-    }
+  const handleEditAddressSelect = ({ address, zip, latitude, longitude }) => {
+    editForm.setFieldsValue({ address, addressDetail: '', zip, latitude, longitude });
+    notification.success({ message: '주소 반영 완료', description: '주소와 좌표가 함께 반영되었습니다.' });
   };
 
   const handleOperationModeChange = (checked) => {
@@ -1648,7 +1474,7 @@ export default function Stores() {
             <Input
               readOnly
               addonAfter={(
-                <Button type="link" size="small" loading={editAddressSearching} onClick={handleEditAddressSearch}>
+                <Button type="link" size="small" onClick={handleEditAddressSearch}>
                   주소 검색
                 </Button>
               )}
@@ -1959,7 +1785,7 @@ export default function Stores() {
             <Input
               readOnly
               addonAfter={(
-                <Button type="link" size="small" loading={addressSearching} onClick={handleAddressSearch}>
+                <Button type="link" size="small" onClick={handleAddressSearch}>
                   주소 검색
                 </Button>
               )}
@@ -2248,6 +2074,16 @@ export default function Stores() {
           </Form.List>
         </StoreForm>
       </Modal>
+      <GoogleAddressSearchModal
+        open={addressModalOpen}
+        onClose={() => setAddressModalOpen(false)}
+        onSelect={handleAddressSelect}
+      />
+      <GoogleAddressSearchModal
+        open={editAddressModalOpen}
+        onClose={() => setEditAddressModalOpen(false)}
+        onSelect={handleEditAddressSelect}
+      />
     </div>
   );
 }
