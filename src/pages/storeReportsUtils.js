@@ -14,6 +14,9 @@ export const normalizeStoreFeedbackItems = (items, feedbackType) => items.map((i
   feedbackType,
 }));
 
+export const getNaverMapsScriptUrl = (clientId) =>
+  `https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${encodeURIComponent(clientId)}&submodules=geocoder`;
+
 export const hasValidCoordinates = ({ latitude, longitude }) => (
   latitude !== ''
   && longitude !== ''

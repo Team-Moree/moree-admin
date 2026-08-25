@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Table, Tag, Typography, Result, Button, App, Select, Space, Modal,
-  Descriptions, Popconfirm, Form, Input, Spin, Alert, Tabs,
+  Descriptions, Popconfirm, Form, Input, Spin, Alert, Tabs, Segmented,
 } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
@@ -10,6 +10,7 @@ import GoogleAddressSearchModal from '../components/GoogleAddressSearchModal';
 import {
   FEEDBACK_TABS,
   buildStoreApplyRequest,
+  getNaverMapsScriptUrl,
   getStoreFeedbackListEndpoint,
   hasValidCoordinates,
   normalizeStoreFeedbackItems,
@@ -50,6 +51,7 @@ const PAGE_SIZE = 50;
 const ALL_FILTER = 'ALL';
 const UNPROCESSED_FILTER = 'UNPROCESSED';
 const PROCESSED_FILTER = 'PROCESSED';
+const DAUM_POSTCODE_SCRIPT_URL = 'https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
 
 const FEEDBACK_TYPE_MAP = {
   EDIT_REQUEST: { color: 'blue', label: '수정 요청' },
@@ -104,6 +106,83 @@ const getStoreInfo = (item) => item?.store || {
 
 const toDateInputValue = (value) => (value ? String(value).slice(0, 10) : '');
 
+let daumPostcodeScriptPromise;
+let naverMapsScriptPromise;
+const NAVER_MAPS_SERVICE_WAIT_MS = 5000;
+
+const loadExternalScript = (src) => new Promise((resolve, reject) => {
+  const existingScript = document.querySelector(`script[src="${src}"]`);
+  if (existingScript) {
+    existingScript.addEventListener('load', resolve, { once: true });
+    existingScript.addEventListener('error', reject, { once: true });
+    if (existingScript.dataset.loaded === 'true') resolve();
+    return;
+  }
+
+  const script = document.createElement('script');
+  script.src = src;
+  script.async = true;
+  script.onload = () => {
+    script.dataset.loaded = 'true';
+    resolve();
+  };
+  script.onerror = reject;
+  document.head.appendChild(script);
+});
+
+const loadDaumPostcode = async () => {
+  if (window.daum?.Postcode) return;
+  daumPostcodeScriptPromise ||= loadExternalScript(DAUM_POSTCODE_SCRIPT_URL);
+  await daumPostcodeScriptPromise;
+};
+
+const waitForNaverMapsService = () => new Promise((resolve, reject) => {
+  const startedAt = Date.now();
+
+  const checkService = () => {
+    if (window.naver?.maps?.Service) {
+      resolve();
+      return;
+    }
+
+    if (Date.now() - startedAt >= NAVER_MAPS_SERVICE_WAIT_MS) {
+      reject(new Error('NAVER Maps Geocoder를 사용할 수 없습니다. 키, 허용 도메인, Geocoding API 설정을 확인하세요.'));
+      return;
+    }
+
+    window.setTimeout(checkService, 100);
+  };
+
+  checkService();
+});
+
+const loadNaverMaps = async (clientId) => {
+  if (window.naver?.maps?.Service) return;
+  naverMapsScriptPromise ||= loadExternalScript(getNaverMapsScriptUrl(clientId));
+  await naverMapsScriptPromise;
+  await waitForNaverMapsService();
+};
+
+const geocodeAddress = async (address, clientId) => {
+  await loadNaverMaps(clientId);
+
+  return new Promise((resolve, reject) => {
+    window.naver.maps.Service.geocode({ query: address }, (status, response) => {
+      const addressResult = response?.v2?.addresses?.[0];
+
+      if (status !== window.naver.maps.Service.Status.OK || !addressResult) {
+        reject(new Error('주소 좌표를 찾을 수 없습니다.'));
+        return;
+      }
+
+      resolve({
+        latitude: Number(addressResult.y),
+        longitude: Number(addressResult.x),
+      });
+    });
+  });
+};
+
 const buildStoreFormValues = (store) => ({
   title: store?.title || '',
   fandomCategoryIds: Array.isArray(store?.fandomCategories)
@@ -148,6 +227,8 @@ export default function StoreReports() {
   const [storeDetailLoaded, setStoreDetailLoaded] = useState(false);
   const [processingKey, setProcessingKey] = useState(null);
   const [addressModalOpen, setAddressModalOpen] = useState(false);
+  const [addressSearching, setAddressSearching] = useState(false);
+  const [addressCountry, setAddressCountry] = useState('domestic');
   const [categories, setCategories] = useState([]);
   const { notification } = App.useApp();
 
@@ -323,8 +404,64 @@ export default function StoreReports() {
     );
   };
 
-  const handleAddressSearch = () => {
-    setAddressModalOpen(true);
+  const handleAddressSearch = async () => {
+    if (addressCountry === 'overseas') {
+      setAddressModalOpen(true);
+      return;
+    }
+
+    const naverMapKey = import.meta.env.VITE_NAVER_MAP_KEY;
+    if (!naverMapKey) {
+      notification.error({
+        message: '주소 검색 설정 필요',
+        description: 'VITE_NAVER_MAP_KEY를 설정해야 주소 좌표를 갱신할 수 있습니다.',
+      });
+      return;
+    }
+
+    setAddressSearching(true);
+    try {
+      await loadDaumPostcode();
+      new window.daum.Postcode({
+        oncomplete: async (data) => {
+          setAddressSearching(true);
+          const selectedAddress = data.roadAddress || data.jibunAddress || data.address;
+          if (!selectedAddress) {
+            notification.error({ message: '주소 선택 실패', description: '선택한 주소를 읽을 수 없습니다.' });
+            setAddressSearching(false);
+            return;
+          }
+
+          try {
+            const coordinates = await geocodeAddress(selectedAddress, naverMapKey);
+            form.setFieldsValue({
+              address: selectedAddress,
+              addressDetail: '',
+              zip: data.zonecode || '',
+              latitude: coordinates.latitude,
+              longitude: coordinates.longitude,
+            });
+            notification.success({ message: '주소 반영 완료', description: '주소와 좌표가 함께 반영되었습니다.' });
+          } catch (err) {
+            notification.error({
+              message: '좌표 조회 실패',
+              description: err.message || '선택한 주소의 좌표를 찾을 수 없습니다.',
+            });
+          } finally {
+            setAddressSearching(false);
+          }
+        },
+        onclose: () => {
+          setAddressSearching(false);
+        },
+      }).open();
+    } catch (err) {
+      notification.error({
+        message: '주소 검색 실패',
+        description: err.message || '주소 검색 스크립트를 불러오지 못했습니다.',
+      });
+      setAddressSearching(false);
+    }
   };
 
   const handleAddressSelect = ({ address, zip, latitude, longitude }) => {
@@ -470,11 +607,18 @@ export default function StoreReports() {
               )}
             </Form.List>
           </Form.Item>
+          <Form.Item label="주소 검색 대상">
+            <Segmented
+              options={[{ label: '국내', value: 'domestic' }, { label: '해외', value: 'overseas' }]}
+              value={addressCountry}
+              onChange={setAddressCountry}
+            />
+          </Form.Item>
           <Form.Item label="주소" name="address">
             <Input
               readOnly
               addonAfter={(
-                <Button type="link" size="small" onClick={handleAddressSearch}>
+                <Button type="link" size="small" loading={addressSearching} onClick={handleAddressSearch}>
                   주소 검색
                 </Button>
               )}

@@ -26,8 +26,8 @@ const extractZip = (addressComponents = []) => {
 };
 
 /**
- * Google Places Autocomplete 기반 주소 검색 모달.
- * 국가 제한이 없어서 국내/해외 주소 모두 검색 가능.
+ * Google Places Autocomplete 기반 해외 주소 검색 모달.
+ * 국내 주소는 카카오 우편번호 + 네이버 지오코딩을 쓴다.
  */
 export default function GoogleAddressSearchModal({ open, onClose, onSelect }) {
   const containerRef = useRef(null);
