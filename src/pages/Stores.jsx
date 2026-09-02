@@ -4,6 +4,7 @@ import { CloseOutlined, DeleteOutlined, EditOutlined, HolderOutlined, PlusOutlin
 import styled from 'styled-components';
 import dayjs from 'dayjs';
 import client from '../api/client';
+import GoogleAddressSearchModal from '../components/GoogleAddressSearchModal';
 
 const Header = styled.div`
   display: flex;
@@ -594,13 +595,17 @@ export default function Stores() {
   const createDragIndexRef = useRef(null);
   const editDragIndexRef = useRef(null);
   const [categories, setCategories] = useState([]);
+  const [addressModalOpen, setAddressModalOpen] = useState(false);
   const [addressSearching, setAddressSearching] = useState(false);
+  const [createAddressCountry, setCreateAddressCountry] = useState('domestic');
   const [useCustomOperationHours, setUseCustomOperationHours] = useState(false);
   const [createExcludedOperationDays, setCreateExcludedOperationDays] = useState([]);
   const [createOperationMode, setCreateOperationMode] = useState('common');
   const [editOpen, setEditOpen] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
+  const [editAddressModalOpen, setEditAddressModalOpen] = useState(false);
   const [editAddressSearching, setEditAddressSearching] = useState(false);
+  const [editAddressCountry, setEditAddressCountry] = useState('domestic');
   const [useCustomEditOperationHours, setUseCustomEditOperationHours] = useState(false);
   const [editExcludedOperationDays, setEditExcludedOperationDays] = useState([]);
   const { notification } = App.useApp();
@@ -861,7 +866,7 @@ export default function Stores() {
     setCreateOpen(true);
   };
 
-  const handleAddressSearch = async () => {
+  const handleDomesticAddressSearch = async (form, setSearching) => {
     const naverMapKey = import.meta.env.VITE_NAVER_MAP_KEY;
 
     if (!naverMapKey) {
@@ -872,22 +877,22 @@ export default function Stores() {
       return;
     }
 
-    setAddressSearching(true);
+    setSearching(true);
     try {
       await loadDaumPostcode();
       new window.daum.Postcode({
         oncomplete: async (data) => {
-          setAddressSearching(true);
+          setSearching(true);
           const selectedAddress = data.roadAddress || data.jibunAddress || data.address;
           if (!selectedAddress) {
             notification.error({ message: '주소 선택 실패', description: '선택한 주소를 읽을 수 없습니다.' });
-            setAddressSearching(false);
+            setSearching(false);
             return;
           }
 
           try {
             const coordinates = await geocodeAddress(selectedAddress, naverMapKey);
-            createForm.setFieldsValue({
+            form.setFieldsValue({
               address: selectedAddress,
               addressDetail: '',
               zip: data.zonecode || '',
@@ -901,11 +906,11 @@ export default function Stores() {
               description: err.message || '선택한 주소의 좌표를 찾을 수 없습니다.',
             });
           } finally {
-            setAddressSearching(false);
+            setSearching(false);
           }
         },
         onclose: () => {
-          setAddressSearching(false);
+          setSearching(false);
         },
       }).open();
     } catch (err) {
@@ -913,64 +918,34 @@ export default function Stores() {
         message: '주소 검색 실패',
         description: err.message || '주소 검색 스크립트를 불러오지 못했습니다.',
       });
-      setAddressSearching(false);
+      setSearching(false);
     }
   };
 
-  const handleEditAddressSearch = async () => {
-    const naverMapKey = import.meta.env.VITE_NAVER_MAP_KEY;
-
-    if (!naverMapKey) {
-      notification.error({
-        message: '주소 검색 설정 필요',
-        description: 'VITE_NAVER_MAP_KEY를 설정해야 주소 좌표를 확정할 수 있습니다.',
-      });
+  const handleAddressSearch = () => {
+    if (createAddressCountry === 'overseas') {
+      setAddressModalOpen(true);
       return;
     }
+    handleDomesticAddressSearch(createForm, setAddressSearching);
+  };
 
-    setEditAddressSearching(true);
-    try {
-      await loadDaumPostcode();
-      new window.daum.Postcode({
-        oncomplete: async (data) => {
-          setEditAddressSearching(true);
-          const selectedAddress = data.roadAddress || data.jibunAddress || data.address;
-          if (!selectedAddress) {
-            notification.error({ message: '주소 선택 실패', description: '선택한 주소를 읽을 수 없습니다.' });
-            setEditAddressSearching(false);
-            return;
-          }
+  const handleAddressSelect = ({ address, zip, latitude, longitude }) => {
+    createForm.setFieldsValue({ address, addressDetail: '', zip, latitude, longitude });
+    notification.success({ message: '주소 반영 완료', description: '주소와 좌표가 함께 반영되었습니다.' });
+  };
 
-          try {
-            const coordinates = await geocodeAddress(selectedAddress, naverMapKey);
-            editForm.setFieldsValue({
-              address: selectedAddress,
-              addressDetail: '',
-              zip: data.zonecode || '',
-              latitude: coordinates.latitude,
-              longitude: coordinates.longitude,
-            });
-            notification.success({ message: '주소 반영 완료', description: '주소와 좌표가 함께 반영되었습니다.' });
-          } catch (err) {
-            notification.error({
-              message: '좌표 조회 실패',
-              description: err.message || '선택한 주소의 좌표를 찾을 수 없습니다.',
-            });
-          } finally {
-            setEditAddressSearching(false);
-          }
-        },
-        onclose: () => {
-          setEditAddressSearching(false);
-        },
-      }).open();
-    } catch (err) {
-      notification.error({
-        message: '주소 검색 실패',
-        description: err.message || '주소 검색 스크립트를 불러오지 못했습니다.',
-      });
-      setEditAddressSearching(false);
+  const handleEditAddressSearch = () => {
+    if (editAddressCountry === 'overseas') {
+      setEditAddressModalOpen(true);
+      return;
     }
+    handleDomesticAddressSearch(editForm, setEditAddressSearching);
+  };
+
+  const handleEditAddressSelect = ({ address, zip, latitude, longitude }) => {
+    editForm.setFieldsValue({ address, addressDetail: '', zip, latitude, longitude });
+    notification.success({ message: '주소 반영 완료', description: '주소와 좌표가 함께 반영되었습니다.' });
   };
 
   const handleOperationModeChange = (checked) => {
@@ -1640,6 +1615,13 @@ export default function Stores() {
           </Form.Item>
 
           <Typography.Title className="store-form-section-title" level={5}>위치</Typography.Title>
+          <Form.Item label="주소 검색 대상">
+            <Segmented
+              options={[{ label: '국내', value: 'domestic' }, { label: '해외', value: 'overseas' }]}
+              value={editAddressCountry}
+              onChange={setEditAddressCountry}
+            />
+          </Form.Item>
           <Form.Item
             label="주소"
             name="address"
@@ -1951,6 +1933,13 @@ export default function Stores() {
           </Form.Item>
 
           <Typography.Title className="store-form-section-title" level={5}>위치</Typography.Title>
+          <Form.Item label="주소 검색 대상">
+            <Segmented
+              options={[{ label: '국내', value: 'domestic' }, { label: '해외', value: 'overseas' }]}
+              value={createAddressCountry}
+              onChange={setCreateAddressCountry}
+            />
+          </Form.Item>
           <Form.Item
             label="주소"
             name="address"
@@ -2248,6 +2237,16 @@ export default function Stores() {
           </Form.List>
         </StoreForm>
       </Modal>
+      <GoogleAddressSearchModal
+        open={addressModalOpen}
+        onClose={() => setAddressModalOpen(false)}
+        onSelect={handleAddressSelect}
+      />
+      <GoogleAddressSearchModal
+        open={editAddressModalOpen}
+        onClose={() => setEditAddressModalOpen(false)}
+        onSelect={handleEditAddressSelect}
+      />
     </div>
   );
 }

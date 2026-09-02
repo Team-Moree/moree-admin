@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Table, Tag, Typography, Result, Button, App, Select, Space, Modal,
-  Descriptions, Popconfirm, Form, Input, Spin, Alert, Tabs,
+  Descriptions, Popconfirm, Form, Input, Spin, Alert, Tabs, Segmented,
 } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import client from '../api/client';
+import GoogleAddressSearchModal from '../components/GoogleAddressSearchModal';
 import {
   FEEDBACK_TABS,
   buildStoreApplyRequest,
@@ -225,7 +226,9 @@ export default function StoreReports() {
   const [storeDetailLoading, setStoreDetailLoading] = useState(false);
   const [storeDetailLoaded, setStoreDetailLoaded] = useState(false);
   const [processingKey, setProcessingKey] = useState(null);
+  const [addressModalOpen, setAddressModalOpen] = useState(false);
   const [addressSearching, setAddressSearching] = useState(false);
+  const [addressCountry, setAddressCountry] = useState('domestic');
   const [categories, setCategories] = useState([]);
   const { notification } = App.useApp();
 
@@ -402,8 +405,12 @@ export default function StoreReports() {
   };
 
   const handleAddressSearch = async () => {
-    const naverMapKey = import.meta.env.VITE_NAVER_MAP_KEY;
+    if (addressCountry === 'overseas') {
+      setAddressModalOpen(true);
+      return;
+    }
 
+    const naverMapKey = import.meta.env.VITE_NAVER_MAP_KEY;
     if (!naverMapKey) {
       notification.error({
         message: '주소 검색 설정 필요',
@@ -455,6 +462,11 @@ export default function StoreReports() {
       });
       setAddressSearching(false);
     }
+  };
+
+  const handleAddressSelect = ({ address, zip, latitude, longitude }) => {
+    form.setFieldsValue({ address, addressDetail: '', zip, latitude, longitude });
+    notification.success({ message: '주소 반영 완료', description: '주소와 좌표가 함께 반영되었습니다.' });
   };
 
   const renderModalFooter = () => {
@@ -594,6 +606,13 @@ export default function StoreReports() {
                 </Space>
               )}
             </Form.List>
+          </Form.Item>
+          <Form.Item label="주소 검색 대상">
+            <Segmented
+              options={[{ label: '국내', value: 'domestic' }, { label: '해외', value: 'overseas' }]}
+              value={addressCountry}
+              onChange={setAddressCountry}
+            />
           </Form.Item>
           <Form.Item label="주소" name="address">
             <Input
@@ -918,6 +937,11 @@ export default function StoreReports() {
       >
         {renderDetailContent()}
       </Modal>
+      <GoogleAddressSearchModal
+        open={addressModalOpen}
+        onClose={() => setAddressModalOpen(false)}
+        onSelect={handleAddressSelect}
+      />
     </div>
   );
 }

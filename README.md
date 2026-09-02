@@ -70,7 +70,7 @@ npm run build:real   # 운영(REAL)
 - 기본값은 `VITE_API_BASE_URL` 미설정 → `/api` → (배포) `vercel.json` → `api.moree.app` 입니다.
   이 방식은 same-origin 이라 **CORS 설정이 필요 없습니다.**
 
-주소 검색 기능을 사용하는 환경에는 `VITE_NAVER_MAP_KEY` 를 설정합니다.
+주소 검색 기능을 사용하는 환경에는 `VITE_NAVER_MAP_KEY`(국내)와 `VITE_GOOGLE_MAPS_KEY`(해외, Google Cloud Console에서 Maps JavaScript API + Places API (New) 활성화 필요)를 함께 설정합니다.
 
 ## 로그인
 
@@ -107,7 +107,8 @@ npm run build:real   # 운영(REAL)
 프로필 배지와 기본 API(api.moree.app)는 코드/`vercel.json` 으로 이미 동작하므로 **필수 변수는 없습니다.**
 지도 기능을 쓰면 아래만 추가:
 
-- `VITE_NAVER_MAP_KEY` = NAVER Maps `ncpKeyId` (Production, Preview 모두)
+- `VITE_NAVER_MAP_KEY` = NAVER Maps `ncpKeyId`, 국내 주소 검색용 (Production, Preview 모두)
+- `VITE_GOOGLE_MAPS_KEY` = Google Maps API 키, 해외 주소 검색용, Maps JavaScript API + Places API (New) 활성화 필요 (Production, Preview 모두)
 
 ### 4. [전환] 개발 배포를 `dev.api.moree.app` 로 직접 연결할 때
 
