@@ -34,13 +34,17 @@ export default function GoogleAddressSearchModal({ open, onClose, onSelect }) {
   const onSelectRef = useRef(onSelect);
   const onCloseRef = useRef(onClose);
   const [loading, setLoading] = useState(false);
+  const [ready, setReady] = useState(false);
   const { notification } = App.useApp();
 
   onSelectRef.current = onSelect;
   onCloseRef.current = onClose;
 
   useEffect(() => {
-    if (!open) return undefined;
+    // ready는 모달의 열림 애니메이션(transform)이 완전히 끝난 뒤 true가 된다.
+    // 애니메이션 중에 위젯을 생성하면 내부 position:fixed 드롭다운이
+    // 아직 남아있는 transform 조상 기준으로 위치를 고정해버려 화면 뒤로 밀리는 문제가 있다.
+    if (!ready) return undefined;
 
     let cancelled = false;
     setLoading(true);
@@ -98,10 +102,16 @@ export default function GoogleAddressSearchModal({ open, onClose, onSelect }) {
       cancelled = true;
       containerRef.current?.replaceChildren();
     };
-  }, [open, notification]);
+  }, [ready, notification]);
 
   return (
-    <Modal open={open} onCancel={onClose} footer={null} title="주소 검색">
+    <Modal
+      open={open}
+      onCancel={onClose}
+      afterOpenChange={setReady}
+      footer={null}
+      title="주소 검색"
+    >
       <div ref={containerRef} style={{ minHeight: 48 }} />
       {loading && <div style={{ marginTop: 8, color: '#999' }}>불러오는 중...</div>}
     </Modal>
