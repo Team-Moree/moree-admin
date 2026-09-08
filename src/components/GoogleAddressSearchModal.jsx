@@ -34,17 +34,13 @@ export default function GoogleAddressSearchModal({ open, onClose, onSelect }) {
   const onSelectRef = useRef(onSelect);
   const onCloseRef = useRef(onClose);
   const [loading, setLoading] = useState(false);
-  const [ready, setReady] = useState(false);
   const { notification } = App.useApp();
 
   onSelectRef.current = onSelect;
   onCloseRef.current = onClose;
 
   useEffect(() => {
-    // ready는 모달의 열림 애니메이션(transform)이 완전히 끝난 뒤 true가 된다.
-    // 애니메이션 중에 위젯을 생성하면 내부 position:fixed 드롭다운이
-    // 아직 남아있는 transform 조상 기준으로 위치를 고정해버려 화면 뒤로 밀리는 문제가 있다.
-    if (!ready) return undefined;
+    if (!open) return undefined;
 
     let cancelled = false;
     setLoading(true);
@@ -102,15 +98,22 @@ export default function GoogleAddressSearchModal({ open, onClose, onSelect }) {
       cancelled = true;
       containerRef.current?.replaceChildren();
     };
-  }, [ready, notification]);
+  }, [open, notification]);
 
   return (
     <Modal
       open={open}
       onCancel={onClose}
-      afterOpenChange={setReady}
       footer={null}
       title="주소 검색"
+      // 위젯이 열리자마자(애니메이션 없이) 렌더링되도록 zoom 트랜지션을 끈다.
+      // Modal에 transform이 걸려있는 동안 PlaceAutocompleteElement가 초기화되면
+      // 내부 position:fixed 드롭다운이 그 transform을 containing block으로 잡아버려
+      // 화면 뒤로 밀리는 문제가 있었다. afterOpenChange로 애니메이션 종료를 기다리는
+      // 방식은 이 환경에서 콜백이 누락되는 경우가 있어(재오픈 시 위젯 자체가 생성되지 않음)
+      // 애니메이션을 아예 없애는 방식으로 대체한다.
+      transitionName=""
+      maskTransitionName=""
     >
       <div ref={containerRef} style={{ minHeight: 48 }} />
       {loading && <div style={{ marginTop: 8, color: '#999' }}>불러오는 중...</div>}
