@@ -851,6 +851,17 @@ export default function Stores() {
     setUseCustomOperationHours(false);
     setCreateExcludedOperationDays([]);
     setCreateOperationMode('common');
+    setCreateFileList([]);
+    setCreateOpen(true);
+  };
+
+  useEffect(() => {
+    // createOpen이 처음 true가 될 때(그 세션에서 모달이 한 번도 mount된 적
+    // 없을 때)는 Modal의 Form.Item들이 아직 등록되지 않은 상태라, handleOpenCreate
+    // 안에서 곧바로 setFieldsValue를 호출하면 값이 반영되지 않고 씹히는 문제가
+    // 있었다. 모달이 실제로 열린 뒤(mount된 뒤) 값을 채우도록 분리한다.
+    if (!createOpen) return;
+
     createForm.setFieldsValue({
       useCustomOperationHours: false,
       useDateOperationHours: false,
@@ -862,9 +873,7 @@ export default function Stores() {
       keywords: [],
       links: [],
     });
-    setCreateFileList([]);
-    setCreateOpen(true);
-  };
+  }, [createOpen, createForm]);
 
   const handleDomesticAddressSearch = async (form, setSearching) => {
     const naverMapKey = import.meta.env.VITE_NAVER_MAP_KEY;
@@ -1838,6 +1847,7 @@ export default function Stores() {
         cancelText="취소"
         width={960}
         destroyOnClose
+        forceRender
       >
         <StoreForm form={createForm} layout="vertical" preserve={false}>
           <Typography.Title className="store-form-section-title" level={5}>기본 정보</Typography.Title>
