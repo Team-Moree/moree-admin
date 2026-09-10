@@ -4,6 +4,7 @@ import { Layout as AntLayout, Menu, Button, theme } from 'antd';
 import {
   DashboardOutlined,
   BarChartOutlined,
+  LineChartOutlined,
   TagsOutlined,
   AimOutlined,
   ShopOutlined,
@@ -62,6 +63,7 @@ const menuItems = [
   { key: '/morees', icon: <SmileOutlined />, label: '모리' },
   { key: '/bookmark-icons', icon: <BookOutlined />, label: '북마크 아이콘' },
   { key: '/notifications', icon: <BellOutlined />, label: '푸시 알림 (QA)' },
+  { key: '/metrics', icon: <LineChartOutlined />, label: '서버 메트릭' },
 ];
 
 export default function Layout({ children }) {
