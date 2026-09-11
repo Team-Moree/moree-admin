@@ -71,3 +71,4 @@ moree-11249-*.json
 *-service-account*.json
 serviceAccountKey*.json
 *.iam.gserviceaccount.com.json
+.vercel

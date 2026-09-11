@@ -76,6 +76,19 @@ npm run build:real   # 운영(REAL)
 
 마스터 토큰을 입력하여 로그인합니다. 토큰은 백엔드 `jwt.masterToken` 설정값과 동일해야 합니다.
 
+## 서버 메트릭 (Grafana Cloud)
+
+`/metrics` 페이지는 moree-api(Alloy)가 Grafana Cloud(Prometheus)로 보낸 지표를 조회합니다.
+GA 분석 페이지(`/api/ga`)와 동일하게, 자격증명이 브라우저에 노출되면 안 되므로 서버리스 함수(`api/metrics/overview.js`)가 대신 Grafana Cloud 를 호출합니다.
+
+- 필요한 서버 env (`.env.metrics.example` 참고, `VITE_` 접두어 없음 — 서버 전용):
+  - `GRAFANA_STACK_URL`, `GRAFANA_PROM_DATASOURCE_UID`, `GRAFANA_SA_TOKEN`
+  - Vercel → Settings → Environment Variables 에 등록 (Development/Preview/Production)
+  - 미설정 시 `503 METRICS_NOT_CONFIGURED` 응답
+- 로컬에서 서버리스 함수까지 실행하려면 `vercel dev` 필요 (`npm start`/vite dev는 함수를 실행하지 못함)
+  - 화면 상단 **실데이터/목업** 토글로 `npm start`에서도 UI 확인 가능 (목업은 `src/pages/metricsMock.js`)
+- 사이드바 맨 아래(서버 개발자 전용 페이지)에 위치
+
 ## Vercel 배포 (레포 1개로 운영 + 개발 동시 운영)
 
 한 레포지토리로 **운영(Production)** 과 **개발(Preview)** 을 동시에 띄웁니다.
