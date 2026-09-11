@@ -107,21 +107,19 @@ function toSeries(points, key) {
 }
 
 // [{ uri, points: [[ts, value], ...] }, ...] → 같은 time축을 공유하는 [{ time, [uri1]: v, [uri2]: v, ... }]
+// 트래픽 없는 구간은 Prometheus가 그 uri의 포인트 자체를 안 돌려주기 때문에 uri마다 배열 길이가
+// 다르다 -> 인덱스로 합치면 안 되고 실제 타임스탬프로 합쳐야 한다.
 function mergeByUri(seriesList) {
-  const length = Math.max(0, ...seriesList.map((s) => s.points.length));
-  const rows = [];
-  for (let i = 0; i < length; i++) {
-    const row = {};
-    seriesList.forEach((s) => {
-      const p = s.points[i];
-      if (p) {
-        row.time = dayjs(p[0] * 1000).format('HH:mm');
-        row[s.uri] = p[1];
-      }
+  const rowsByTime = new Map();
+  seriesList.forEach((s) => {
+    s.points.forEach(([t, v]) => {
+      if (!rowsByTime.has(t)) rowsByTime.set(t, { time: dayjs(t * 1000).format('HH:mm') });
+      rowsByTime.get(t)[s.uri] = v;
     });
-    rows.push(row);
-  }
-  return rows;
+  });
+  return Array.from(rowsByTime.keys())
+    .sort((a, b) => a - b)
+    .map((t) => rowsByTime.get(t));
 }
 
 export default function Metrics() {
@@ -333,10 +331,44 @@ export default function Metrics() {
                         domain={[0, 'auto']}
                         tickCount={7}
                       />
-                      <Tooltip formatter={(v) => `${Math.round(v * 1000)}ms`} />
+                      <Tooltip
+                        content={({ active, payload, label }) => {
+                          if (!active || !payload?.length) return null;
+                          const rows = highlightedUri
+                            ? payload.filter((p) => p.dataKey === highlightedUri)
+                            : payload;
+                          return (
+                            <div
+                              style={{
+                                background: '#fff',
+                                border: '1px solid #f0f0f0',
+                                borderRadius: 8,
+                                padding: '8px 12px',
+                                fontSize: 12,
+                                boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                              }}
+                            >
+                              <div style={{ color: '#8c8c8c', marginBottom: 4 }}>{label}</div>
+                              {rows.map((r) => (
+                                <div key={r.dataKey} style={{ color: r.color }}>
+                                  {r.dataKey}: {Math.round(r.value * 1000)}ms
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        }}
+                      />
                       <Legend
                         onClick={(e) => setHighlightedUri((prev) => (prev === e.dataKey ? null : e.dataKey))}
                         wrapperStyle={{ cursor: 'pointer' }}
+                        formatter={(value, entry) => {
+                          const dimmed = highlightedUri && highlightedUri !== entry.dataKey;
+                          return (
+                            <span style={{ opacity: dimmed ? 0.35 : 1, fontWeight: highlightedUri === entry.dataKey ? 500 : 400 }}>
+                              {value}
+                            </span>
+                          );
+                        }}
                       />
                       {uris.map((uri, i) => (
                         <Line
@@ -345,7 +377,7 @@ export default function Metrics() {
                           dataKey={uri}
                           stroke={CAT[i % CAT.length]}
                           dot={false}
-                          strokeWidth={highlightedUri === uri ? 3 : 2}
+                          strokeWidth={2}
                           strokeOpacity={highlightedUri && highlightedUri !== uri ? 0.15 : 1}
                         />
                       ))}
