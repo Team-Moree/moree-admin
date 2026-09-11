@@ -16,7 +16,12 @@
 // env 가 채워지기 전에는 METRICS_NOT_CONFIGURED(503)로 명확히 응답한다.
 
 // 엔드포인트별 차트에서 제외할 비즈니스 무관 경로(인프라/문서용, 실사용자 트래픽 아님)
-const NOISE_URI_FILTER = 'uri!~"/actuator/.*|/health|/swagger-ui/.*|/v3/api-docs"';
+// uri 라벨은 실제 요청 경로가 아니라 스프링 핸들러 매핑의 URI 템플릿이라
+// swagger-ui 계열은 "/swagger-ui*/**" 처럼 리터럴 '*'가 붙어 내려온다 -> 슬래시 요구 없이 매칭.
+// v3/api-docs 계열도 "/v3/api-docs/swagger-config" 같은 하위 경로가 있어 .* 필요.
+// UNKNOWN은 매핑되지 않은 요청(404/스캐너 등)이 뭉뚱그려지는 버킷이라 특정 엔드포인트로 액션 불가 -> 제외.
+// social-login은 외부 OAuth 왕복 호출이 껴서 원래도 느린 게 정상이라 -> 다른 API와 같은 척도로 비교하면 왜곡됨.
+const NOISE_URI_FILTER = 'uri!~"/actuator.*|/health|/swagger-ui.*|/v3/api-docs.*|UNKNOWN|/auth/social-login"';
 
 class HttpError extends Error {
   constructor(status, code, message) {
@@ -127,11 +132,11 @@ export default async function handler(req, res) {
       ),
       queryInstant(
         config,
-        `topk(10, max by (uri) (http_server_requests_seconds{quantile="0.95", ${NOISE_URI_FILTER}}))`
+        `topk(10, max by (uri) (max_over_time(http_server_requests_seconds{quantile="0.95", ${NOISE_URI_FILTER}}[${rangeHours}h])))`
       ),
       queryInstant(
         config,
-        `max(http_server_requests_seconds{quantile="0.95", ${NOISE_URI_FILTER}})`
+        `max(max_over_time(http_server_requests_seconds{quantile="0.95", ${NOISE_URI_FILTER}}[${rangeHours}h]))`
       ),
       queryInstant(
         config,
