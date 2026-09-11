@@ -259,7 +259,7 @@ export default function Metrics() {
                     value={Math.round(data.worstP95Seconds * 1000)}
                     suffix="ms"
                   />
-                  <HintText>지금 가장 느린 엔드포인트의 p95 — 아래 Top 10 표에서 어떤 API인지 확인</HintText>
+                  <HintText>선택한 기간 중 가장 느렸던 엔드포인트의 p95 — 아래 Top 10 표에서 어떤 API인지 확인</HintText>
                 </SoftCard>
               </Col>
               <Col xs={24} sm={12} lg={6}>
@@ -326,7 +326,13 @@ export default function Metrics() {
                     <LineChart data={p95Chart}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#eef0f2" />
                       <XAxis dataKey="time" fontSize={12} />
-                      <YAxis fontSize={12} tickFormatter={(v) => `${Math.round(v * 1000)}ms`} />
+                      <YAxis
+                        fontSize={12}
+                        width={60}
+                        tickFormatter={(v) => `${Math.round(v * 1000)}ms`}
+                        domain={[0, 'auto']}
+                        tickCount={7}
+                      />
                       <Tooltip formatter={(v) => `${Math.round(v * 1000)}ms`} />
                       <Legend
                         onClick={(e) => setHighlightedUri((prev) => (prev === e.dataKey ? null : e.dataKey))}
@@ -400,7 +406,7 @@ export default function Metrics() {
                     <AreaChart data={gcChart}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#eef0f2" />
                       <XAxis dataKey="time" fontSize={11} />
-                      <YAxis fontSize={11} />
+                      <YAxis fontSize={11} width={50} domain={[0, 'auto']} tickCount={6} />
                       <Tooltip />
                       <Area type="monotone" dataKey="overhead" stroke={CAT[3]} fill={`${CAT[3]}22`} />
                     </AreaChart>
