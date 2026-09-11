@@ -127,7 +127,7 @@ export default async function handler(req, res) {
     ] = await Promise.all([
       queryRange(
         config,
-        `max by (uri) (http_server_requests_seconds{quantile="0.95", ${NOISE_URI_FILTER}})`,
+        `max by (uri) (max_over_time(http_server_requests_seconds{quantile="0.95", ${NOISE_URI_FILTER}}[${step}s]))`,
         { start, end: now, step }
       ),
       queryInstant(
