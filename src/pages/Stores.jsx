@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Image, Spin, Popconfirm, Alert, Input, Form, DatePicker, Upload, Switch, Segmented, Tooltip } from 'antd';
-import { CloseOutlined, DeleteOutlined, EditOutlined, HolderOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
+import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Image, Spin, Popconfirm, Alert, Input, Form, DatePicker, Upload, Switch, Segmented, Badge } from 'antd';
+import { CloseOutlined, DeleteOutlined, EditOutlined, FilterOutlined, HolderOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import dayjs from 'dayjs';
 import client from '../api/client';
@@ -665,6 +665,7 @@ export default function Stores() {
   const [enriching, setEnriching] = useState(false);
   const [tablePage, setTablePage] = useState(1);
   const [tablePageSize, setTablePageSize] = useState(20);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [statusUpdatingId, setStatusUpdatingId] = useState(null);
@@ -894,6 +895,11 @@ export default function Stores() {
 
   const needsCountryOrPeriodFilter = countryFilter !== 'ALL' || !!periodRange;
   const needsFullList = categoryFilter.length > 0 || needsCountryOrPeriodFilter;
+  const activeAdvancedFilterCount = (categoryFilter.length > 0 ? 1 : 0)
+    + (countryFilter !== 'ALL' ? 1 : 0)
+    + (periodRange ? 1 : 0);
+  // 필터가 하나라도 걸려 있으면, 접혀 있어도 왜 결과가 줄었는지 알 수 있게 강제로 펼쳐서 보여준다.
+  const showAdvancedFilters = advancedFiltersOpen || activeAdvancedFilterCount > 0;
 
   useEffect(() => {
     if (!needsFullList) return undefined;
@@ -1560,20 +1566,34 @@ export default function Stores() {
             onSearch={handleSearch}
             style={{ width: 260 }}
           />
-          <Select
-            mode="multiple"
-            placeholder="카테고리별로 보기"
-            allowClear
-            value={categoryFilter}
-            onChange={setCategoryFilter}
-            style={{ minWidth: 180 }}
-            maxTagCount="responsive"
-            options={categories.map((category) => ({
-              value: category.fandomCategoryId,
-              label: category.displayName,
-            }))}
-          />
-          <Tooltip title="주소 텍스트로 추정한 값이라 100% 정확하지 않을 수 있어요. (한글 포함 → 한국, 히라가나·가타카나/일본 행정구역 표기 → 일본, 중국 행정구역 표기(성·자치구 등)나 6자리 우편번호 → 중국)">
+          <Badge count={activeAdvancedFilterCount} size="small" offset={[-4, 4]}>
+            <Button
+              icon={<FilterOutlined />}
+              type={activeAdvancedFilterCount > 0 ? 'primary' : 'default'}
+              ghost={activeAdvancedFilterCount > 0}
+              onClick={() => setAdvancedFiltersOpen((prev) => !prev)}
+            >
+              상세 필터
+            </Button>
+          </Badge>
+        </Space>
+      </Header>
+      {showAdvancedFilters && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+          <Space wrap>
+            <Select
+              mode="multiple"
+              placeholder="카테고리별로 보기"
+              allowClear
+              value={categoryFilter}
+              onChange={setCategoryFilter}
+              style={{ minWidth: 180 }}
+              maxTagCount="responsive"
+              options={categories.map((category) => ({
+                value: category.fandomCategoryId,
+                label: category.displayName,
+              }))}
+            />
             <Select
               placeholder="국가"
               value={countryFilter}
@@ -1581,14 +1601,14 @@ export default function Stores() {
               style={{ width: 130 }}
               options={COUNTRY_FILTER_OPTIONS}
             />
-          </Tooltip>
-          <DatePicker.RangePicker
-            placeholder={['행사 시작일', '행사 종료일']}
-            value={periodRange}
-            onChange={setPeriodRange}
-          />
-        </Space>
-      </Header>
+            <DatePicker.RangePicker
+              placeholder={['행사 시작일', '행사 종료일']}
+              value={periodRange}
+              onChange={setPeriodRange}
+            />
+          </Space>
+        </div>
+      )}
       {(loadingAll || enriching) && (
         <Alert
           style={{ marginBottom: 12 }}
