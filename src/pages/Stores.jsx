@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Image, Spin, Popconfirm, Alert, Input, Form, DatePicker, Upload, Switch, Segmented } from 'antd';
+import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Image, Spin, Popconfirm, Alert, Input, Form, DatePicker, Upload, Switch, Segmented, Tooltip } from 'antd';
 import { CloseOutlined, DeleteOutlined, EditOutlined, HolderOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import dayjs from 'dayjs';
@@ -276,6 +276,81 @@ const normalizeKeywords = (keywords) => {
   }
 
   return [];
+};
+
+// 목록 API가 국가 정보를 내려주지 않아, 상세 조회로 받은 주소/우편번호 텍스트로 추정한다.
+// 서버가 국가 필드를 내려주기 시작하면 이 휴리스틱은 제거하고 그 값을 그대로 쓰면 된다.
+const COUNTRY_FILTER_OPTIONS = [
+  { value: 'ALL', label: '전체' },
+  { value: 'KR', label: '한국' },
+  { value: 'JP', label: '일본' },
+  { value: 'CN', label: '중국' },
+  { value: 'ETC', label: '기타/미확인' },
+];
+const COUNTRY_LABEL_MAP = Object.fromEntries(COUNTRY_FILTER_OPTIONS.map((option) => [option.value, option.label]));
+const COUNTRY_TAG_COLOR = { KR: 'blue', JP: 'volcano', CN: 'gold', ETC: 'default' };
+
+const HANGUL_PATTERN = /[가-힣]/;
+// 히라가나/가타카나는 일본어에만 있는 문자라 나오면 바로 일본으로 확정할 수 있다.
+const KANA_PATTERN = /[぀-ゟ゠-ヿー]/;
+// '道'는 중국 주소의 '대로(大道)' 등에도 흔히 쓰여 제외한다. (홋카이도는 '北海道'가 아래 CJK+우편번호 분기로 넘어가 처리됨)
+const JP_ADDRESS_KEYWORD_PATTERN = /(都|府|県|丁目|番地)/;
+// 省/自治区/直辖市/县/镇은 중국 행정구역·간체자 표기에서만 쓰여 일본 주소와 구분된다.
+const CN_ADDRESS_KEYWORD_PATTERN = /(省|自治区|特别行政区|直辖市|县|镇)/;
+const CJK_IDEOGRAPH_PATTERN = /[一-鿿]/;
+const JAPAN_ZIP_PATTERN = /^\d{3}-\d{4}$/;
+const CHINA_ZIP_PATTERN = /^\d{6}$/;
+
+const detectStoreCountry = (address, zip) => {
+  const text = address || '';
+  const trimmedZip = (zip || '').trim();
+
+  if (HANGUL_PATTERN.test(text)) return 'KR';
+  if (KANA_PATTERN.test(text)) return 'JP';
+  if (JP_ADDRESS_KEYWORD_PATTERN.test(text)) return 'JP';
+  if (CN_ADDRESS_KEYWORD_PATTERN.test(text)) return 'CN';
+
+  if (CJK_IDEOGRAPH_PATTERN.test(text)) {
+    // 한자만 있고 일본/중국 특유 키워드로 구분이 안 되면 우편번호 형식으로 최종 판별한다.
+    if (JAPAN_ZIP_PATTERN.test(trimmedZip)) return 'JP';
+    if (CHINA_ZIP_PATTERN.test(trimmedZip)) return 'CN';
+    return 'ETC';
+  }
+
+  if (JAPAN_ZIP_PATTERN.test(trimmedZip)) return 'JP';
+
+  return 'ETC';
+};
+
+const DETAIL_FETCH_BATCH_SIZE = 5;
+
+const fetchStoreDetailsBatch = async (storeIds) => {
+  const detailsById = {};
+
+  for (let i = 0; i < storeIds.length; i += DETAIL_FETCH_BATCH_SIZE) {
+    const batch = storeIds.slice(i, i + DETAIL_FETCH_BATCH_SIZE);
+    const batchResults = await Promise.all(batch.map(async (storeId) => {
+      try {
+        const res = await client.get(`/admin/store/${storeId}`);
+        return [storeId, {
+          address: res.data?.address || '',
+          zip: res.data?.zip || '',
+          startDate: res.data?.startDate || null,
+          finishDate: res.data?.finishDate || null,
+          failed: false,
+        }];
+      } catch {
+        // 실패도 캐시에 남겨서 필터를 켤 때마다 같은 스토어를 계속 재요청하지 않게 한다.
+        return [storeId, { address: '', zip: '', startDate: null, finishDate: null, failed: true }];
+      }
+    }));
+
+    batchResults.forEach(([storeId, value]) => {
+      detailsById[storeId] = value;
+    });
+  }
+
+  return detailsById;
 };
 
 let daumPostcodeScriptPromise;
@@ -582,6 +657,14 @@ export default function Stores() {
   const [searchKeyword, setSearchKeyword] = useState(undefined);
   const [nextCursor, setNextCursor] = useState(null);
   const [hasMore, setHasMore] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState([]);
+  const [countryFilter, setCountryFilter] = useState('ALL');
+  const [periodRange, setPeriodRange] = useState(null);
+  const [detailCache, setDetailCache] = useState({});
+  const [loadingAll, setLoadingAll] = useState(false);
+  const [enriching, setEnriching] = useState(false);
+  const [tablePage, setTablePage] = useState(1);
+  const [tablePageSize, setTablePageSize] = useState(20);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [statusUpdatingId, setStatusUpdatingId] = useState(null);
@@ -774,6 +857,129 @@ export default function Stores() {
   useEffect(() => {
     fetchCategories();
   }, [fetchCategories]);
+
+  // 국가/기간 필터는 목록 API에 없는 정보(주소, 행사 기간)가 필요하다.
+  // 이 필터가 켜지면 커서 페이지네이션 전체를 끝까지 불러온 뒤 스토어별 상세를 채운다.
+  const fetchAllForCurrentQuery = useCallback(async (status, search) => {
+    setLoadingAll(true);
+    try {
+      let cursor = '';
+      let all = [];
+      let more = true;
+
+      while (more) {
+        const params = { next: cursor, size: PAGE_SIZE };
+        if (status && status !== ALL_STATUS) params.status = status;
+        if (search) params.search = search;
+
+        const res = await client.get('/admin/store/list', { params });
+        const list = Array.isArray(res.data?.results) ? res.data.results : [];
+        all = all.concat(list);
+        cursor = res.data?.next || '';
+        more = !!cursor;
+      }
+
+      setData(all);
+      setNextCursor(null);
+      setHasMore(false);
+      return all;
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || '스토어 전체 조회 실패';
+      notification.error({ message: '조회 실패', description: msg });
+      return null;
+    } finally {
+      setLoadingAll(false);
+    }
+  }, [notification]);
+
+  const needsCountryOrPeriodFilter = countryFilter !== 'ALL' || !!periodRange;
+  const needsFullList = categoryFilter.length > 0 || needsCountryOrPeriodFilter;
+
+  useEffect(() => {
+    if (!needsFullList) return undefined;
+
+    let cancelled = false;
+
+    (async () => {
+      const fullList = hasMore ? await fetchAllForCurrentQuery(statusFilter, searchKeyword) : data;
+      if (cancelled || !fullList || !needsCountryOrPeriodFilter) return;
+
+      const missingIds = fullList
+        .map((item) => item.storeId)
+        .filter((storeId) => !detailCache[storeId]);
+      if (missingIds.length === 0) return;
+
+      setEnriching(true);
+      try {
+        const fetched = await fetchStoreDetailsBatch(missingIds);
+        if (!cancelled) setDetailCache((prev) => ({ ...prev, ...fetched }));
+      } finally {
+        if (!cancelled) setEnriching(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsFullList, needsCountryOrPeriodFilter, statusFilter, searchKeyword]);
+
+  const filteredData = data.filter((item) => {
+    if (categoryFilter.length > 0) {
+      const categoryIds = (item.fandomCategories || []).map((category) => category.fandomCategoryId);
+      if (!categoryFilter.some((id) => categoryIds.includes(id))) return false;
+    }
+
+    if (countryFilter !== 'ALL') {
+      const cached = detailCache[item.storeId];
+      if (!cached) return false;
+      if (detectStoreCountry(cached.address, cached.zip) !== countryFilter) return false;
+    }
+
+    if (periodRange?.[0] && periodRange?.[1]) {
+      const cached = detailCache[item.storeId];
+      if (!cached?.startDate || !cached?.finishDate) return false;
+      const storeStart = dayjs(cached.startDate);
+      const storeFinish = dayjs(cached.finishDate);
+      const overlaps = !storeFinish.isBefore(periodRange[0], 'day') && !storeStart.isAfter(periodRange[1], 'day');
+      if (!overlaps) return false;
+    }
+
+    return true;
+  });
+
+  // 필터가 바뀌면 이전 페이지 번호가 새 결과 범위를 벗어날 수 있어 1페이지로 되돌린다.
+  useEffect(() => {
+    setTablePage(1);
+  }, [categoryFilter, countryFilter, periodRange, statusFilter, searchKeyword]);
+
+  const visiblePageIds = filteredData
+    .slice((tablePage - 1) * tablePageSize, tablePage * tablePageSize)
+    .map((item) => item.storeId);
+  const visiblePageIdsKey = visiblePageIds.join(',');
+
+  // 행사 기간은 기본 컬럼으로 항상 보여주지만, 목록 전체를 상세조회하면 느려지므로
+  // 실제로 화면에 보이는 페이지 분량만 그때그때 채운다. (국가·기간 필터가 켜져 있으면
+  // 위 effect가 이미 전체를 채우는 중이라 여기서 또 요청할 필요가 없다.)
+  useEffect(() => {
+    if (needsCountryOrPeriodFilter || !visiblePageIdsKey) return undefined;
+
+    const missingIds = visiblePageIdsKey
+      .split(',')
+      .filter((storeId) => storeId && !detailCache[storeId]);
+    if (missingIds.length === 0) return undefined;
+
+    let cancelled = false;
+    (async () => {
+      const fetched = await fetchStoreDetailsBatch(missingIds);
+      if (!cancelled) setDetailCache((prev) => ({ ...prev, ...fetched }));
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visiblePageIdsKey, needsCountryOrPeriodFilter]);
 
   const handleStatusFilter = (value) => {
     setStatusFilter(value);
@@ -1145,6 +1351,14 @@ export default function Stores() {
       notification.success({ message: '수정 완료', description: '스토어 정보가 수정되었습니다.' });
       handleCloseEdit();
 
+      // 주소/기간이 바뀌었을 수 있으니 국가·기간 필터용 캐시를 비워 다음에 다시 조회하게 한다.
+      setDetailCache((prev) => {
+        if (!prev[detail.storeId]) return prev;
+        const next = { ...prev };
+        delete next[detail.storeId];
+        return next;
+      });
+
       try {
         const res = await client.get(`/admin/store/${detail.storeId}`);
         setDetail(res.data);
@@ -1247,6 +1461,29 @@ export default function Stores() {
           </Tag>
         )),
     },
+    ...(countryFilter !== 'ALL' ? [{
+      title: '국가',
+      key: 'country',
+      width: 100,
+      render: (_, record) => {
+        const cached = detailCache[record.storeId];
+        if (!cached) return <Tag>확인 중</Tag>;
+        if (cached.failed) return <Tag color="error">조회 실패</Tag>;
+        const country = detectStoreCountry(cached.address, cached.zip);
+        return <Tag color={COUNTRY_TAG_COLOR[country]}>{COUNTRY_LABEL_MAP[country]}</Tag>;
+      },
+    }] : []),
+    {
+      title: '행사 기간',
+      key: 'period',
+      width: 200,
+      render: (_, record) => {
+        const cached = detailCache[record.storeId];
+        if (!cached) return <Spin size="small" />;
+        if (cached.failed) return '조회 실패';
+        return cached.startDate && cached.finishDate ? `${cached.startDate} ~ ${cached.finishDate}` : '-';
+      },
+    },
     {
       title: '승인 상태',
       dataIndex: 'approvalStatus',
@@ -1323,23 +1560,68 @@ export default function Stores() {
             onSearch={handleSearch}
             style={{ width: 260 }}
           />
+          <Select
+            mode="multiple"
+            placeholder="카테고리별로 보기"
+            allowClear
+            value={categoryFilter}
+            onChange={setCategoryFilter}
+            style={{ minWidth: 180 }}
+            maxTagCount="responsive"
+            options={categories.map((category) => ({
+              value: category.fandomCategoryId,
+              label: category.displayName,
+            }))}
+          />
+          <Tooltip title="주소 텍스트로 추정한 값이라 100% 정확하지 않을 수 있어요. (한글 포함 → 한국, 히라가나·가타카나/일본 행정구역 표기 → 일본, 중국 행정구역 표기(성·자치구 등)나 6자리 우편번호 → 중국)">
+            <Select
+              placeholder="국가"
+              value={countryFilter}
+              onChange={setCountryFilter}
+              style={{ width: 130 }}
+              options={COUNTRY_FILTER_OPTIONS}
+            />
+          </Tooltip>
+          <DatePicker.RangePicker
+            placeholder={['행사 시작일', '행사 종료일']}
+            value={periodRange}
+            onChange={setPeriodRange}
+          />
         </Space>
       </Header>
+      {(loadingAll || enriching) && (
+        <Alert
+          style={{ marginBottom: 12 }}
+          type="info"
+          showIcon
+          message={loadingAll ? '전체 스토어 목록을 불러오는 중입니다...' : '국가·기간 필터를 위해 스토어별 상세 정보를 조회하는 중입니다...'}
+          description="목록 API에 국가/행사 기간 정보가 없어 스토어마다 상세 조회를 거치는 임시 방식입니다. 스토어가 많으면 시간이 걸릴 수 있습니다."
+        />
+      )}
       <StyledTable
         columns={columns}
-        dataSource={data}
+        dataSource={filteredData}
         rowKey="storeId"
-        loading={loading}
+        loading={loading || loadingAll || enriching}
         rowClassName={(record) => {
           if (!isAllStatusView) return '';
           if (record.approvalStatus === 'PENDING') return 'pending-review-row';
           if (record.approvalStatus === 'HIDDEN') return 'hidden-store-row';
           return '';
         }}
-        pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => `총 ${total}건` }}
+        pagination={{
+          current: tablePage,
+          pageSize: tablePageSize,
+          showSizeChanger: true,
+          showTotal: (total) => `총 ${total}건`,
+          onChange: (page, pageSize) => {
+            setTablePage(page);
+            setTablePageSize(pageSize);
+          },
+        }}
         size="middle"
         footer={() =>
-          hasMore ? (
+          hasMore && !needsFullList ? (
             <Button type="link" onClick={handleLoadMore} loading={loading}>
               더 불러오기
             </Button>
