@@ -11,7 +11,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
 } from 'recharts';
 import dayjs from 'dayjs';
 import styled from 'styled-components';
@@ -358,18 +357,6 @@ export default function Metrics() {
                           );
                         }}
                       />
-                      <Legend
-                        onClick={(e) => setHighlightedUri((prev) => (prev === e.dataKey ? null : e.dataKey))}
-                        wrapperStyle={{ cursor: 'pointer' }}
-                        formatter={(value, entry) => {
-                          const dimmed = highlightedUri && highlightedUri !== entry.dataKey;
-                          return (
-                            <span style={{ opacity: dimmed ? 0.35 : 1, fontWeight: highlightedUri === entry.dataKey ? 500 : 400 }}>
-                              {value}
-                            </span>
-                          );
-                        }}
-                      />
                       {uris.map((uri, i) => (
                         <Line
                           key={uri}
@@ -383,6 +370,26 @@ export default function Metrics() {
                       ))}
                     </LineChart>
                   </ResponsiveContainer>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginTop: 12 }}>
+                    {uris.map((uri, i) => {
+                      const dimmed = highlightedUri && highlightedUri !== uri;
+                      return (
+                        <span
+                          key={uri}
+                          onClick={() => setHighlightedUri((prev) => (prev === uri ? null : uri))}
+                          style={{
+                            cursor: 'pointer',
+                            fontSize: 12,
+                            color: CAT[i % CAT.length],
+                            opacity: dimmed ? 0.35 : 1,
+                            fontWeight: highlightedUri === uri ? 500 : 400,
+                          }}
+                        >
+                          ● {uri}
+                        </span>
+                      );
+                    })}
+                  </div>
                 </SoftCard>
               </Col>
             </Row>
