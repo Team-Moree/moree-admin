@@ -108,6 +108,10 @@ export default async function handler(req, res) {
     const rangeHours = Number(req.query?.rangeHours) || 6;
     const start = now - rangeHours * 3600;
     const step = Math.max(15, Math.floor((rangeHours * 3600) / 200)); // 최대 약 200 포인트
+    // max_over_time이 훑어볼 구간의 최소 폭. step이 스크레이프 주기(보통 30~60초)보다
+    // 짧으면(예: 1시간 범위 -> step 18초) 그 구간 안에 원본 샘플이 아예 없을 수 있어
+    // 여전히 값을 놓친다 -> 최소 60초는 보장한다.
+    const lookback = Math.max(step, 60);
 
     const [
       p95ByEndpointRange,
@@ -127,7 +131,7 @@ export default async function handler(req, res) {
     ] = await Promise.all([
       queryRange(
         config,
-        `max by (uri) (max_over_time(http_server_requests_seconds{quantile="0.95", ${NOISE_URI_FILTER}}[${step}s]))`,
+        `max by (uri) (max_over_time(http_server_requests_seconds{quantile="0.95", ${NOISE_URI_FILTER}}[${lookback}s]))`,
         { start, end: now, step }
       ),
       queryInstant(
@@ -159,7 +163,7 @@ export default async function handler(req, res) {
       ),
       queryRange(
         config,
-        `100 * max_over_time(tomcat_threads_busy_threads[${step}s]) / tomcat_threads_config_max_threads`,
+        `100 * max_over_time(tomcat_threads_busy_threads[${lookback}s]) / tomcat_threads_config_max_threads`,
         { start, end: now, step }
       ),
       queryInstant(
@@ -168,7 +172,7 @@ export default async function handler(req, res) {
       ),
       queryRange(
         config,
-        `100 * max_over_time(hikaricp_connections_active[${step}s]) / hikaricp_connections_max`,
+        `100 * max_over_time(hikaricp_connections_active[${lookback}s]) / hikaricp_connections_max`,
         { start, end: now, step }
       ),
       queryInstant(config, `max_over_time(hikaricp_connections_pending[${rangeHours}h])`),
@@ -178,10 +182,10 @@ export default async function handler(req, res) {
       ),
       queryRange(
         config,
-        `100 * sum(max_over_time(jvm_memory_used_bytes{area="heap"}[${step}s])) / sum(jvm_memory_max_bytes{area="heap"})`,
+        `100 * sum(max_over_time(jvm_memory_used_bytes{area="heap"}[${lookback}s])) / sum(jvm_memory_max_bytes{area="heap"})`,
         { start, end: now, step }
       ),
-      queryRange(config, `max_over_time(jvm_gc_overhead[${step}s])`, { start, end: now, step }),
+      queryRange(config, `max_over_time(jvm_gc_overhead[${lookback}s])`, { start, end: now, step }),
     ]);
 
     return res.status(200).json({
