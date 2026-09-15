@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "moree-admin",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["start"],
+      "port": 3000
+    },
+    {
+      "name": "moree-admin-beta",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start:beta"],
+      "port": 3000
+    }
+  ]
+}
