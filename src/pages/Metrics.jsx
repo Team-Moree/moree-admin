@@ -357,7 +357,22 @@ export default function Metrics() {
                           );
                         }}
                       />
-                      {uris.map((uri, i) => (
+                      {uris.flatMap((uri, i) => [
+                        // 실제 보이는 선(2px)은 클릭하기엔 너무 얇아서, 투명한 굵은 선을 겹쳐
+                        // 클릭 히트 영역만 넓힌다 (화면엔 안 보임)
+                        <Line
+                          key={`${uri}-hit`}
+                          type="monotone"
+                          dataKey={uri}
+                          stroke="transparent"
+                          strokeWidth={16}
+                          dot={false}
+                          activeDot={false}
+                          isAnimationActive={false}
+                          legendType="none"
+                          onClick={() => setHighlightedUri((prev) => (prev === uri ? null : uri))}
+                          style={{ cursor: 'pointer' }}
+                        />,
                         <Line
                           key={uri}
                           type="monotone"
@@ -366,8 +381,10 @@ export default function Metrics() {
                           dot={false}
                           strokeWidth={2}
                           strokeOpacity={highlightedUri && highlightedUri !== uri ? 0.15 : 1}
-                        />
-                      ))}
+                          onClick={() => setHighlightedUri((prev) => (prev === uri ? null : uri))}
+                          style={{ cursor: 'pointer' }}
+                        />,
+                      ])}
                     </LineChart>
                   </ResponsiveContainer>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginTop: 12 }}>
