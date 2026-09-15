@@ -151,29 +151,37 @@ export default async function handler(req, res) {
         config,
         '100 * sum(rate(http_server_requests_seconds_count{status=~"4.."}[5m])) / sum(rate(http_server_requests_seconds_count[5m]))'
       ),
-      queryInstant(config, '100 * tomcat_threads_busy_threads / tomcat_threads_config_max_threads'),
-      queryRange(config, '100 * tomcat_threads_busy_threads / tomcat_threads_config_max_threads', {
-        start,
-        end: now,
-        step,
-      }),
-      queryInstant(config, '100 * hikaricp_connections_active / hikaricp_connections_max'),
-      queryRange(config, '100 * hikaricp_connections_active / hikaricp_connections_max', {
-        start,
-        end: now,
-        step,
-      }),
-      queryInstant(config, 'hikaricp_connections_pending'),
+      // 스레드/커넥션/힙 사용량도 순간 게이지라 p95와 같은 이유로 max_over_time 사용 —
+      // 짧게 쓰고 반납되는 리소스는 스크레이프 순간에 우연히 안 잡히면 계속 0%로 보인다.
       queryInstant(
         config,
-        '100 * sum(jvm_memory_used_bytes{area="heap"}) / sum(jvm_memory_max_bytes{area="heap"})'
+        `100 * max_over_time(tomcat_threads_busy_threads[${rangeHours}h]) / tomcat_threads_config_max_threads`
       ),
       queryRange(
         config,
-        '100 * sum(jvm_memory_used_bytes{area="heap"}) / sum(jvm_memory_max_bytes{area="heap"})',
+        `100 * max_over_time(tomcat_threads_busy_threads[${step}s]) / tomcat_threads_config_max_threads`,
         { start, end: now, step }
       ),
-      queryRange(config, 'jvm_gc_overhead', { start, end: now, step }),
+      queryInstant(
+        config,
+        `100 * max_over_time(hikaricp_connections_active[${rangeHours}h]) / hikaricp_connections_max`
+      ),
+      queryRange(
+        config,
+        `100 * max_over_time(hikaricp_connections_active[${step}s]) / hikaricp_connections_max`,
+        { start, end: now, step }
+      ),
+      queryInstant(config, `max_over_time(hikaricp_connections_pending[${rangeHours}h])`),
+      queryInstant(
+        config,
+        `100 * sum(max_over_time(jvm_memory_used_bytes{area="heap"}[${rangeHours}h])) / sum(jvm_memory_max_bytes{area="heap"})`
+      ),
+      queryRange(
+        config,
+        `100 * sum(max_over_time(jvm_memory_used_bytes{area="heap"}[${step}s])) / sum(jvm_memory_max_bytes{area="heap"})`,
+        { start, end: now, step }
+      ),
+      queryRange(config, `max_over_time(jvm_gc_overhead[${step}s])`, { start, end: now, step }),
     ]);
 
     return res.status(200).json({
