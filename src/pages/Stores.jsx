@@ -239,6 +239,11 @@ const CATEGORY_COLORS = {
 };
 
 const PAGE_SIZE = 50;
+// 지도 뷰·국가/기간 필터가 전체 목록을 끝까지 받을 때 쓰는 크기.
+// 커서 페이징이라 왕복이 순차로 쌓이므로 한 번에 받는 편이 빠르다.
+// (실측: 922건 전체가 226KB / 0.12초. 스토어가 수천 건 규모로 커지면
+//  지도 영역별 조회로 바꾸는 편이 낫다.)
+const FULL_FETCH_PAGE_SIZE = 1000;
 const ALL_STATUS = 'ALL';
 const STORE_CREATE_ENDPOINT = '/admin/store';
 const DAUM_POSTCODE_SCRIPT_URL = 'https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
@@ -327,7 +332,32 @@ const detectStoreCountry = (address, zip) => {
 // 밀집도가 가장 높은 홍대 일대를 기본으로 보여주고, 이후 이동/확대는 사용자에게 맡긴다.
 const HONGDAE_DEFAULT_VIEW = { center: { lat: 37.5563, lng: 126.9236 }, zoom: 15 };
 
-const DETAIL_FETCH_BATCH_SIZE = 5;
+// 브라우저가 한 도메인에 여는 동시 연결이 6개 수준이라, 이보다 크게 잡으면
+// 큐 대기 때문에 건당 지연만 늘고(실측 60ms -> 200ms) 라운드마다 가장 느린 요청을
+// 기다리게 되어 오히려 느려진다. 연결 수에 맞춰 잡는다.
+const DETAIL_FETCH_BATCH_SIZE = 6;
+
+/**
+ * 목록 한 건에서 지도 마커·국가 필터·행사 기간에 필요한 정보를 꺼낸다.
+ *
+ * 목록 API 가 좌표까지 내려주면 그대로 쓰고, 아직 내려주지 않는 구버전 응답이면
+ * 상세 조회로 채운 캐시를 쓴다. 덕분에 백엔드 배포 순서와 무관하게 동작하며,
+ * 배포되는 순간 상세 조회가 저절로 사라진다.
+ */
+const getStoreMeta = (item, detailCache) => {
+  if (item?.latitude != null && item?.longitude != null) {
+    return {
+      address: item.address || '',
+      zip: item.zip || '',
+      startDate: item.startDate ?? null,
+      finishDate: item.finishDate ?? null,
+      latitude: item.latitude,
+      longitude: item.longitude,
+      failed: false,
+    };
+  }
+  return detailCache[item?.storeId] || null;
+};
 
 const fetchStoreDetailsBatch = async (storeIds) => {
   const detailsById = {};
@@ -885,7 +915,7 @@ export default function Stores() {
       let more = true;
 
       while (more) {
-        const params = { next: cursor, size: PAGE_SIZE };
+        const params = { next: cursor, size: FULL_FETCH_PAGE_SIZE };
         if (status && status !== ALL_STATUS) params.status = status;
         if (search) params.search = search;
 
@@ -930,8 +960,8 @@ export default function Stores() {
       if (cancelled || !fullList || !needsDetailEnrichment) return;
 
       const missingIds = fullList
-        .map((item) => item.storeId)
-        .filter((storeId) => !detailCache[storeId]);
+        .filter((item) => !getStoreMeta(item, detailCache))
+        .map((item) => item.storeId);
       if (missingIds.length === 0) return;
 
       setEnriching(true);
@@ -958,16 +988,16 @@ export default function Stores() {
     }
 
     if (countryFilter !== 'ALL') {
-      const cached = detailCache[item.storeId];
-      if (!cached) return false;
-      if (detectStoreCountry(cached.address, cached.zip) !== countryFilter) return false;
+      const meta = getStoreMeta(item, detailCache);
+      if (!meta) return false;
+      if (detectStoreCountry(meta.address, meta.zip) !== countryFilter) return false;
     }
 
     if (periodRange?.[0] && periodRange?.[1]) {
-      const cached = detailCache[item.storeId];
-      if (!cached?.startDate || !cached?.finishDate) return false;
-      const storeStart = dayjs(cached.startDate);
-      const storeFinish = dayjs(cached.finishDate);
+      const meta = getStoreMeta(item, detailCache);
+      if (!meta?.startDate || !meta?.finishDate) return false;
+      const storeStart = dayjs(meta.startDate);
+      const storeFinish = dayjs(meta.finishDate);
       const overlaps = !storeFinish.isBefore(periodRange[0], 'day') && !storeStart.isAfter(periodRange[1], 'day');
       if (!overlaps) return false;
     }
@@ -978,16 +1008,16 @@ export default function Stores() {
   // 지도 마커에 필요한 좌표는 목록 API 응답에 없어 상세 캐시에서 채운다.
   const mapStores = filteredData
     .map((item) => {
-      const cached = detailCache[item.storeId];
-      if (cached?.latitude == null || cached?.longitude == null) return null;
+      const meta = getStoreMeta(item, detailCache);
+      if (meta?.latitude == null || meta?.longitude == null) return null;
       return {
         storeId: item.storeId,
         title: item.title,
-        latitude: cached.latitude,
-        longitude: cached.longitude,
+        latitude: meta.latitude,
+        longitude: meta.longitude,
         approvalStatus: item.approvalStatus,
         statusLabel: (STATUS_MAP[item.approvalStatus] || {}).label || item.approvalStatus,
-        address: cached.address,
+        address: meta.address,
       };
     })
     .filter(Boolean);
@@ -1010,7 +1040,8 @@ export default function Stores() {
 
     const missingIds = visiblePageIdsKey
       .split(',')
-      .filter((storeId) => storeId && !detailCache[storeId]);
+      .filter((storeId) => storeId
+        && !getStoreMeta(data.find((item) => String(item.storeId) === storeId), detailCache));
     if (missingIds.length === 0) return undefined;
 
     let cancelled = false;
@@ -1510,10 +1541,10 @@ export default function Stores() {
       key: 'country',
       width: 100,
       render: (_, record) => {
-        const cached = detailCache[record.storeId];
-        if (!cached) return <Tag>확인 중</Tag>;
-        if (cached.failed) return <Tag color="error">조회 실패</Tag>;
-        const country = detectStoreCountry(cached.address, cached.zip);
+        const meta = getStoreMeta(record, detailCache);
+        if (!meta) return <Tag>확인 중</Tag>;
+        if (meta.failed) return <Tag color="error">조회 실패</Tag>;
+        const country = detectStoreCountry(meta.address, meta.zip);
         return <Tag color={COUNTRY_TAG_COLOR[country]}>{COUNTRY_LABEL_MAP[country]}</Tag>;
       },
     }] : []),
@@ -1522,10 +1553,10 @@ export default function Stores() {
       key: 'period',
       width: 200,
       render: (_, record) => {
-        const cached = detailCache[record.storeId];
-        if (!cached) return <Spin size="small" />;
-        if (cached.failed) return '조회 실패';
-        return cached.startDate && cached.finishDate ? `${cached.startDate} ~ ${cached.finishDate}` : '-';
+        const meta = getStoreMeta(record, detailCache);
+        if (!meta) return <Spin size="small" />;
+        if (meta.failed) return '조회 실패';
+        return meta.startDate && meta.finishDate ? `${meta.startDate} ~ ${meta.finishDate}` : '-';
       },
     },
     {
