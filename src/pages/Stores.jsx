@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Image, Spin, Popconfirm, Alert, Input, Form, DatePicker, Upload, Switch, Segmented, Badge } from 'antd';
-import { CloseOutlined, DeleteOutlined, EditOutlined, FilterOutlined, HolderOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
+import { CloseOutlined, DeleteOutlined, EditOutlined, EnvironmentOutlined, FilterOutlined, HolderOutlined, PlusOutlined, TableOutlined, UploadOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import dayjs from 'dayjs';
 import client from '../api/client';
 import GoogleAddressSearchModal from '../components/GoogleAddressSearchModal';
+import StoreMap from '../components/StoreMap';
 
 const Header = styled.div`
   display: flex;
@@ -322,6 +323,10 @@ const detectStoreCountry = (address, zip) => {
   return 'ETC';
 };
 
+// 지도 뷰 첫 진입 시야. 스토어가 전국·해외에 흩어져 있어 전체에 맞추면 너무 멀어지므로
+// 밀집도가 가장 높은 홍대 일대를 기본으로 보여주고, 이후 이동/확대는 사용자에게 맡긴다.
+const HONGDAE_DEFAULT_VIEW = { center: { lat: 37.5563, lng: 126.9236 }, zoom: 15 };
+
 const DETAIL_FETCH_BATCH_SIZE = 5;
 
 const fetchStoreDetailsBatch = async (storeIds) => {
@@ -337,11 +342,21 @@ const fetchStoreDetailsBatch = async (storeIds) => {
           zip: res.data?.zip || '',
           startDate: res.data?.startDate || null,
           finishDate: res.data?.finishDate || null,
+          latitude: res.data?.latitude ?? null,
+          longitude: res.data?.longitude ?? null,
           failed: false,
         }];
       } catch {
         // 실패도 캐시에 남겨서 필터를 켤 때마다 같은 스토어를 계속 재요청하지 않게 한다.
-        return [storeId, { address: '', zip: '', startDate: null, finishDate: null, failed: true }];
+        return [storeId, {
+          address: '',
+          zip: '',
+          startDate: null,
+          finishDate: null,
+          latitude: null,
+          longitude: null,
+          failed: true,
+        }];
       }
     }));
 
@@ -666,6 +681,7 @@ export default function Stores() {
   const [tablePage, setTablePage] = useState(1);
   const [tablePageSize, setTablePageSize] = useState(20);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const [listView, setListView] = useState('table');
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [statusUpdatingId, setStatusUpdatingId] = useState(null);
@@ -893,8 +909,11 @@ export default function Stores() {
     }
   }, [notification]);
 
-  const needsCountryOrPeriodFilter = countryFilter !== 'ALL' || !!periodRange;
-  const needsFullList = categoryFilter.length > 0 || needsCountryOrPeriodFilter;
+  const isMapView = listView === 'map';
+  // 국가·기간 필터는 주소/행사 기간이, 지도 뷰는 좌표가 필요한데 모두 목록 API 응답에 없다.
+  // 셋 중 하나라도 켜지면 스토어별 상세 조회로 목록을 보강해야 한다.
+  const needsDetailEnrichment = countryFilter !== 'ALL' || !!periodRange || isMapView;
+  const needsFullList = categoryFilter.length > 0 || needsDetailEnrichment;
   const activeAdvancedFilterCount = (categoryFilter.length > 0 ? 1 : 0)
     + (countryFilter !== 'ALL' ? 1 : 0)
     + (periodRange ? 1 : 0);
@@ -908,7 +927,7 @@ export default function Stores() {
 
     (async () => {
       const fullList = hasMore ? await fetchAllForCurrentQuery(statusFilter, searchKeyword) : data;
-      if (cancelled || !fullList || !needsCountryOrPeriodFilter) return;
+      if (cancelled || !fullList || !needsDetailEnrichment) return;
 
       const missingIds = fullList
         .map((item) => item.storeId)
@@ -928,7 +947,7 @@ export default function Stores() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [needsFullList, needsCountryOrPeriodFilter, statusFilter, searchKeyword]);
+  }, [needsFullList, needsDetailEnrichment, statusFilter, searchKeyword]);
 
   const filteredData = data.filter((item) => {
     if (categoryFilter.length > 0) {
@@ -954,6 +973,23 @@ export default function Stores() {
     return true;
   });
 
+  // 지도 마커에 필요한 좌표는 목록 API 응답에 없어 상세 캐시에서 채운다.
+  const mapStores = filteredData
+    .map((item) => {
+      const cached = detailCache[item.storeId];
+      if (cached?.latitude == null || cached?.longitude == null) return null;
+      return {
+        storeId: item.storeId,
+        title: item.title,
+        latitude: cached.latitude,
+        longitude: cached.longitude,
+        approvalStatus: item.approvalStatus,
+        statusLabel: (STATUS_MAP[item.approvalStatus] || {}).label || item.approvalStatus,
+        address: cached.address,
+      };
+    })
+    .filter(Boolean);
+
   // 필터가 바뀌면 이전 페이지 번호가 새 결과 범위를 벗어날 수 있어 1페이지로 되돌린다.
   useEffect(() => {
     setTablePage(1);
@@ -968,7 +1004,7 @@ export default function Stores() {
   // 실제로 화면에 보이는 페이지 분량만 그때그때 채운다. (국가·기간 필터가 켜져 있으면
   // 위 effect가 이미 전체를 채우는 중이라 여기서 또 요청할 필요가 없다.)
   useEffect(() => {
-    if (needsCountryOrPeriodFilter || !visiblePageIdsKey) return undefined;
+    if (needsDetailEnrichment || !visiblePageIdsKey) return undefined;
 
     const missingIds = visiblePageIdsKey
       .split(',')
@@ -985,7 +1021,7 @@ export default function Stores() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visiblePageIdsKey, needsCountryOrPeriodFilter]);
+  }, [visiblePageIdsKey, needsDetailEnrichment]);
 
   const handleStatusFilter = (value) => {
     setStatusFilter(value);
@@ -1540,6 +1576,14 @@ export default function Stores() {
       <Header>
         <Typography.Title level={4} style={{ margin: 0 }}>스토어</Typography.Title>
         <Space wrap>
+          <Segmented
+            value={listView}
+            onChange={setListView}
+            options={[
+              { label: '표', value: 'table', icon: <TableOutlined /> },
+              { label: '지도', value: 'map', icon: <EnvironmentOutlined /> },
+            ]}
+          />
           <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate}>
             스토어 추가
           </Button>
@@ -1614,40 +1658,63 @@ export default function Stores() {
           style={{ marginBottom: 12 }}
           type="info"
           showIcon
-          message={loadingAll ? '전체 스토어 목록을 불러오는 중입니다...' : '국가·기간 필터를 위해 스토어별 상세 정보를 조회하는 중입니다...'}
-          description="목록 API에 국가/행사 기간 정보가 없어 스토어마다 상세 조회를 거치는 임시 방식입니다. 스토어가 많으면 시간이 걸릴 수 있습니다."
+          message={loadingAll
+            ? '전체 스토어 목록을 불러오는 중입니다...'
+            : isMapView
+              ? '지도에 표시할 스토어 좌표를 조회하는 중입니다...'
+              : '국가·기간 필터를 위해 스토어별 상세 정보를 조회하는 중입니다...'}
+          description="목록 API에 국가/행사 기간/좌표 정보가 없어 스토어마다 상세 조회를 거치는 임시 방식입니다. 스토어가 많으면 시간이 걸릴 수 있습니다."
         />
       )}
-      <StyledTable
-        columns={columns}
-        dataSource={filteredData}
-        rowKey="storeId"
-        loading={loading || loadingAll || enriching}
-        rowClassName={(record) => {
-          if (!isAllStatusView) return '';
-          if (record.approvalStatus === 'PENDING') return 'pending-review-row';
-          if (record.approvalStatus === 'HIDDEN') return 'hidden-store-row';
-          return '';
-        }}
-        pagination={{
-          current: tablePage,
-          pageSize: tablePageSize,
-          showSizeChanger: true,
-          showTotal: (total) => `총 ${total}건`,
-          onChange: (page, pageSize) => {
-            setTablePage(page);
-            setTablePageSize(pageSize);
-          },
-        }}
-        size="middle"
-        footer={() =>
-          hasMore && !needsFullList ? (
-            <Button type="link" onClick={handleLoadMore} loading={loading}>
-              더 불러오기
-            </Button>
-          ) : null
-        }
-      />
+      {isMapView ? (
+        <>
+          <StoreMap
+            stores={mapStores}
+            loading={loading || loadingAll || enriching}
+            onMarkerClick={handleOpenDetail}
+            height={560}
+            initialView={HONGDAE_DEFAULT_VIEW}
+            emptyText="조건에 맞는 스토어가 없거나 좌표 정보를 불러오지 못했습니다."
+          />
+          <Typography.Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+            홍대 일대를 기본으로 보여줍니다. 지도를 움직이거나 축소하면 다른 지역 마커도 볼 수 있습니다.
+            {' '}총 {filteredData.length}건 중 {mapStores.length}건을 지도에 표시했습니다.
+            {filteredData.length > mapStores.length && ' (좌표를 불러오지 못한 스토어는 제외됩니다.)'}
+            {' '}마커를 클릭하면 상세 정보를 볼 수 있습니다.
+          </Typography.Text>
+        </>
+      ) : (
+        <StyledTable
+          columns={columns}
+          dataSource={filteredData}
+          rowKey="storeId"
+          loading={loading || loadingAll || enriching}
+          rowClassName={(record) => {
+            if (!isAllStatusView) return '';
+            if (record.approvalStatus === 'PENDING') return 'pending-review-row';
+            if (record.approvalStatus === 'HIDDEN') return 'hidden-store-row';
+            return '';
+          }}
+          pagination={{
+            current: tablePage,
+            pageSize: tablePageSize,
+            showSizeChanger: true,
+            showTotal: (total) => `총 ${total}건`,
+            onChange: (page, pageSize) => {
+              setTablePage(page);
+              setTablePageSize(pageSize);
+            },
+          }}
+          size="middle"
+          footer={() =>
+            hasMore && !needsFullList ? (
+              <Button type="link" onClick={handleLoadMore} loading={loading}>
+                더 불러오기
+              </Button>
+            ) : null
+          }
+        />
+      )}
       <Modal
         title={modalTitle}
         open={detailLoading || !!detail}
@@ -1759,6 +1826,22 @@ export default function Stores() {
                 <div>
                   <div className="store-detail-label">전화번호</div>
                   <div className="store-detail-value store-detail-value-box">{detail.phoneNumber || '-'}</div>
+                </div>
+                <div className="store-detail-item-full">
+                  <div className="store-detail-label">지도</div>
+                  <StoreMap
+                    height={280}
+                    stores={[{
+                      storeId: detail.storeId,
+                      title: detail.title,
+                      latitude: detail.latitude,
+                      longitude: detail.longitude,
+                      approvalStatus: detail.approvalStatus,
+                      statusLabel: (STATUS_MAP[detail.approvalStatus] || {}).label || detail.approvalStatus,
+                      address: [detail.address, detail.addressDetail].filter(Boolean).join(' '),
+                    }]}
+                    emptyText="등록된 좌표가 없습니다."
+                  />
                 </div>
               </div>
 
