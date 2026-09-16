@@ -681,7 +681,7 @@ export default function Stores() {
   const [tablePage, setTablePage] = useState(1);
   const [tablePageSize, setTablePageSize] = useState(20);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
-  const [listView, setListView] = useState('table');
+  const [listView, setListView] = useState('map');
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [statusUpdatingId, setStatusUpdatingId] = useState(null);
@@ -946,8 +946,10 @@ export default function Stores() {
     return () => {
       cancelled = true;
     };
+    // hasMore 도 의존성에 둔다. 지도 뷰가 기본이면 이 effect 가 첫 목록 조회보다 먼저 돌아
+    // data 가 빈 상태로 아무것도 하지 않고 끝나므로, 조회가 끝난 뒤 다시 실행돼야 한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [needsFullList, needsDetailEnrichment, statusFilter, searchKeyword]);
+  }, [needsFullList, needsDetailEnrichment, statusFilter, searchKeyword, hasMore]);
 
   const filteredData = data.filter((item) => {
     if (categoryFilter.length > 0) {
