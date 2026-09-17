@@ -711,10 +711,10 @@ export default function Stores() {
   const [tablePage, setTablePage] = useState(1);
   const [tablePageSize, setTablePageSize] = useState(20);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
-  // 지도 뷰는 진입 즉시 전체 목록을 받아 스토어마다 상세를 조회하므로(922건 기준 922회)
-  // 메뉴에 들어오기만 해도 서버에 부담이 간다. 목록 응답이 좌표를 내려주게 되면
-  // (moree-api #160) 상세 조회가 사라지므로 그때 기본값을 'map' 으로 되돌린다.
-  const [listView, setListView] = useState('table');
+  // 목록 응답이 좌표를 내려주므로(moree-api #160, 베타 배포 완료) 지도 뷰 진입에
+  // 스토어별 상세 조회가 붙지 않는다. 좌표가 없는 구버전 응답에서는 getStoreMeta 가
+  // 상세 조회 캐시로 폴백한다.
+  const [listView, setListView] = useState('map');
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [statusUpdatingId, setStatusUpdatingId] = useState(null);
