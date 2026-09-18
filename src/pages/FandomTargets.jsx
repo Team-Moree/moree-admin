@@ -1,9 +1,11 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Table, Tag, Input, Avatar, Typography, Result, Button, App,
-  Select, Space, Modal, Form, Descriptions, Checkbox,
+  Select, Space, Modal, Form, Descriptions, Checkbox, Upload, Popconfirm,
 } from 'antd';
-import { SearchOutlined, EditOutlined } from '@ant-design/icons';
+import {
+  SearchOutlined, EditOutlined, PlusOutlined, UploadOutlined, DeleteOutlined,
+} from '@ant-design/icons';
 import styled from 'styled-components';
 import client from '../api/client';
 
@@ -62,6 +64,16 @@ export default function FandomTargets() {
   const [editType, setEditType] = useState('CHARACTER');
   const [editCategoryIds, setEditCategoryIds] = useState([]);
   const [saving, setSaving] = useState(false);
+
+  // 추가 모달
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createForm] = Form.useForm();
+  const [createType, setCreateType] = useState('CHARACTER');
+  const [createFileList, setCreateFileList] = useState([]);
+  const [creating, setCreating] = useState(false);
+
+  // 삭제 중인 대상 id (버튼 로딩 표시용)
+  const [deletingId, setDeletingId] = useState(null);
 
   // 카테고리 목록
   const [categories, setCategories] = useState([]);
@@ -162,6 +174,88 @@ export default function FandomTargets() {
     }, {}),
     [data],
   );
+
+  const uploadProps = {
+    beforeUpload: () => false, // 자동 업로드 방지 (submit 시 직접 전송)
+    maxCount: 1,
+    accept: 'image/*',
+    listType: 'picture',
+  };
+
+  const openCreateModal = () => {
+    createForm.setFieldsValue({
+      type: 'CHARACTER',
+      name: '',
+      source: '',
+      status: 'APPROVED',
+      fandomCategoryIds: [],
+    });
+    setCreateType('CHARACTER');
+    setCreateFileList([]);
+    setCreateOpen(true);
+  };
+
+  // 추가는 multipart 다. request 파트는 JSON, image 파트는 선택이다.
+  // 작품(WORK)은 그 자체가 소스라 소스를 보내지 않는다 — 함께 보내면 서버가 400 으로 거절한다.
+  const handleCreate = async () => {
+    try {
+      const values = await createForm.validateFields();
+      setCreating(true);
+
+      const isWork = values.type === 'WORK';
+      const request = {
+        name: values.name.trim(),
+        type: values.type,
+        status: values.status,
+        fandomCategoryIds: values.fandomCategoryIds,
+      };
+      const source = values.source?.trim();
+      if (!isWork && source) request.source = source;
+
+      const formData = new FormData();
+      formData.append('request', new Blob([JSON.stringify(request)], { type: 'application/json' }));
+      if (createFileList.length > 0) {
+        formData.append('image', createFileList[0].originFileObj);
+      }
+
+      await client.post('/admin/fandom-target', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      notification.success({ message: '추가 완료', description: '덕질 대상이 등록되었습니다.' });
+      setCreateOpen(false);
+      createForm.resetFields();
+      setCreateFileList([]);
+      reload();
+    } catch (err) {
+      if (err.errorFields) return; // 폼 검증 실패는 폼이 직접 표시한다
+      const msg = err.response?.data?.message || err.message || '덕질 대상 추가 실패';
+      notification.error({ message: '추가 실패', description: msg });
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  // 삭제는 row 를 실제로 지운다. 이미 이 대상을 덕질 목록에 담은 사용자가 있으면 서버가 409 로 거절한다.
+  const handleDelete = async (record) => {
+    setDeletingId(record.fandomTargetId);
+    try {
+      await client.delete(`/admin/fandom-target/${record.fandomTargetId}`);
+      notification.success({
+        message: '삭제 완료',
+        description: `'${record.name}' 을(를) 삭제했습니다.`,
+      });
+      reload();
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || '덕질 대상 삭제 실패';
+      notification.error({
+        message: err.response?.status === 409 ? '삭제할 수 없음' : '삭제 실패',
+        description: msg,
+      });
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const openEditModal = (record) => {
     setEditTarget(record);
@@ -299,15 +393,34 @@ export default function FandomTargets() {
     {
       title: '관리',
       key: 'action',
-      width: 80,
+      width: 150,
       render: (_, record) => (
-        <Button
-          type="link"
-          icon={<EditOutlined />}
-          onClick={() => openEditModal(record)}
-        >
-          수정
-        </Button>
+        <Space size={0}>
+          <Button
+            type="link"
+            icon={<EditOutlined />}
+            onClick={() => openEditModal(record)}
+          >
+            수정
+          </Button>
+          <Popconfirm
+            title="덕질 대상 삭제"
+            description={`'${record.name}' 을(를) 삭제합니다. 되돌릴 수 없습니다.`}
+            okText="삭제"
+            cancelText="취소"
+            okButtonProps={{ danger: true }}
+            onConfirm={() => handleDelete(record)}
+          >
+            <Button
+              type="link"
+              danger
+              icon={<DeleteOutlined />}
+              loading={deletingId === record.fandomTargetId}
+            >
+              삭제
+            </Button>
+          </Popconfirm>
+        </Space>
       ),
     },
   ];
@@ -379,6 +492,9 @@ export default function FandomTargets() {
             style={{ width: 300 }}
             allowClear
           />
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+            덕질 대상 추가
+          </Button>
         </Space>
       </Header>
 
@@ -390,6 +506,102 @@ export default function FandomTargets() {
         pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `총 ${t}건` }}
         size="middle"
       />
+
+      {/* 추가 모달 */}
+      <Modal
+        title="덕질 대상 추가"
+        open={createOpen}
+        onCancel={() => setCreateOpen(false)}
+        onOk={handleCreate}
+        confirmLoading={creating}
+        okText="추가"
+        cancelText="취소"
+        width={560}
+        destroyOnClose
+      >
+        <Form form={createForm} layout="vertical">
+          <Form.Item
+            label="유형"
+            name="type"
+            rules={[{ required: true, message: '유형을 선택해주세요' }]}
+            extra="작품은 자동으로 만들어지지 않습니다. 작품으로 지정하면 소스는 비워집니다."
+          >
+            <Select
+              onChange={(value) => {
+                setCreateType(value);
+                // 작품으로 바꾸면 남아 있던 소스 입력을 비운다 — 서버가 작품+소스 조합을 거절한다.
+                if (value === 'WORK') createForm.setFieldValue('source', '');
+              }}
+              options={Object.entries(TYPE_MAP).map(([value, { color, label }]) => ({
+                value,
+                label: <Tag color={color}>{label}</Tag>,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item
+            label="이름"
+            name="name"
+            rules={[{ required: true, whitespace: true, message: '이름을 입력해주세요' }]}
+          >
+            <Input placeholder="덕질 대상 이름" maxLength={200} />
+          </Form.Item>
+          <Form.Item label="이미지 (선택)">
+            <Upload
+              {...uploadProps}
+              fileList={createFileList}
+              onChange={({ fileList }) => setCreateFileList(fileList.slice(-1))}
+            >
+              {createFileList.length === 0 && (
+                <Button icon={<UploadOutlined />}>이미지 선택</Button>
+              )}
+            </Upload>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              jpg, png, gif, webp 지원. 서버에서 512px 로 리사이즈해 업로드합니다. 생략하면 이미지 없이 등록됩니다.
+            </Typography.Text>
+          </Form.Item>
+          <Form.Item
+            label="소스"
+            name="source"
+            extra={createType === 'WORK'
+              ? '작품은 그 자체가 소스이므로 소스를 지정하지 않습니다.'
+              : '소속 작품 이름. 여기에 적어도 그 이름의 작품 대상이 따로 생기지는 않습니다.'}
+          >
+            <Input.TextArea
+              disabled={createType === 'WORK'}
+              placeholder={createType === 'WORK' ? '작품에는 소스를 지정하지 않습니다' : '출처(원작/URL 등)'}
+              maxLength={500}
+              autoSize={{ minRows: 1, maxRows: 4 }}
+            />
+          </Form.Item>
+          <Form.Item
+            label="상태"
+            name="status"
+            rules={[{ required: true, message: '상태를 선택해주세요' }]}
+          >
+            <Select
+              options={[
+                { value: 'APPROVED', label: '승인' },
+                { value: 'PENDING', label: '대기' },
+                { value: 'REJECTED', label: '거절' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
+            label="카테고리"
+            name="fandomCategoryIds"
+            rules={[{ required: true, message: '카테고리를 하나 이상 선택해주세요' }]}
+            extra="신규 등록에는 카테고리가 최소 하나 필요합니다."
+          >
+            <Checkbox.Group style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {categories.map((cat) => (
+                <Checkbox key={cat.fandomCategoryId} value={cat.fandomCategoryId}>
+                  <Tag color={CATEGORY_COLORS[cat.category] || 'default'}>{cat.displayName}</Tag>
+                </Checkbox>
+              ))}
+            </Checkbox.Group>
+          </Form.Item>
+        </Form>
+      </Modal>
 
       {/* 수정 모달 */}
       <Modal
