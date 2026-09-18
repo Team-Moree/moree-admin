@@ -78,7 +78,7 @@ export default function FandomTargets() {
   // 카테고리 목록
   const [categories, setCategories] = useState([]);
 
-  const { notification } = App.useApp();
+  const { notification, modal } = App.useApp();
 
   const fetchCategories = async () => {
     try {
@@ -248,9 +248,17 @@ export default function FandomTargets() {
       reload();
     } catch (err) {
       const msg = err.response?.data?.message || err.message || '덕질 대상 삭제 실패';
-      notification.error({
-        message: err.response?.status === 409 ? '삭제할 수 없음' : '삭제 실패',
-        description: msg,
+      // 지워지지 않는 이유는 화면에서 해결할 수 없는 경우(이미 사용자가 담은 대상 등)가 많아,
+      // 알림 대신 팝업으로 확실히 알리고 관리자 문의로 안내한다.
+      modal.error({
+        title: '삭제할 수 없습니다',
+        content: (
+          <div>
+            <div>{msg}</div>
+            <div style={{ marginTop: 8 }}>관리자에게 문의해주세요.</div>
+          </div>
+        ),
+        okText: '확인',
       });
     } finally {
       setDeletingId(null);
