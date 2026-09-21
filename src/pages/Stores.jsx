@@ -244,6 +244,9 @@ const PAGE_SIZE = 50;
 // (실측: 922건 전체가 226KB / 0.12초. 스토어가 수천 건 규모로 커지면
 //  지도 영역별 조회로 바꾸는 편이 낫다.)
 const FULL_FETCH_PAGE_SIZE = 1000;
+// 지도 뷰는 화면에 보이는 영역만 조회한다. 마커가 이보다 많아지면 읽을 수 없으므로
+// 여기서 끊고, 더 있다는 사실만 안내해 확대를 유도한다.
+const MAP_FETCH_SIZE = 100;
 const ALL_STATUS = 'ALL';
 const STORE_CREATE_ENDPOINT = '/admin/store';
 const DAUM_POSTCODE_SCRIPT_URL = 'https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
@@ -326,6 +329,19 @@ const detectStoreCountry = (address, zip) => {
   if (JAPAN_ZIP_PATTERN.test(trimmedZip)) return 'JP';
 
   return 'ETC';
+};
+
+/**
+ * 좌표가 지도 영역 안에 있는지. 지도 영역 조회를 아직 지원하지 않는 서버에서도
+ * 화면 밖 마커가 찍히지 않도록 클라이언트에서 한 번 더 거른다.
+ * 날짜변경선을 걸친 영역(wrapped)은 경도 범위가 뒤집혀 있어 판정을 반대로 한다.
+ */
+const isWithinMapBounds = (lat, lng, bounds) => {
+  if (!bounds) return true;
+  if (lat < bounds.swLat || lat > bounds.neLat) return false;
+  return bounds.wrapped
+    ? lng >= bounds.swLng || lng <= bounds.neLng
+    : lng >= bounds.swLng && lng <= bounds.neLng;
 };
 
 // 지도 뷰 첫 진입 시야. 스토어가 전국·해외에 흩어져 있어 전체에 맞추면 너무 멀어지므로
@@ -715,6 +731,18 @@ export default function Stores() {
   // 스토어별 상세 조회가 붙지 않는다. 좌표가 없는 구버전 응답에서는 getStoreMeta 가
   // 상세 조회 캐시로 폴백한다.
   const [listView, setListView] = useState('map');
+  // 지도가 마지막으로 조회한 영역 이후로 움직였는지. 움직였으면 '이 지역에서 재조회' 를 띄운다.
+  const [mapMoved, setMapMoved] = useState(false);
+  // 지도 영역에 MAP_FETCH_SIZE 를 넘는 스토어가 있어 일부만 보여주는 중인지.
+  const [mapTruncated, setMapTruncated] = useState(false);
+  const [mapLoading, setMapLoading] = useState(false);
+  // 마지막으로 조회에 쓴 영역. 마커를 이 영역으로 한 번 더 거르는 데 쓴다.
+  const [queriedMapBounds, setQueriedMapBounds] = useState(null);
+  // 지도가 현재 보여주는 영역(idle 마다 갱신). 렌더에 쓰지 않으므로 ref 로 둔다.
+  const latestMapBoundsRef = useRef(null);
+  // 지도 조회를 이미 한 번이라도 했는지. 첫 idle 이 초기 조회를 시작시킨다.
+  const mapQueriedRef = useRef(false);
+  const isMapView = listView === 'map';
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [statusUpdatingId, setStatusUpdatingId] = useState(null);
@@ -889,9 +917,75 @@ export default function Stores() {
     }
   }, [notification]);
 
+  /**
+   * 지도 뷰 전용 조회. 화면에 보이는 영역(bounds) 안의 스토어만 최대 MAP_FETCH_SIZE 건 받아온다.
+   *
+   * 날짜변경선을 걸친 시야는 경도 범위가 뒤집혀 서버가 영역을 해석할 수 없으므로,
+   * 그때는 영역 없이 최신순으로만 받고 마커는 아래 mapStores 에서 화면 안쪽으로 걸러낸다.
+   */
+  const fetchMapData = useCallback(async (bounds, { status, search }) => {
+    if (!bounds) return;
+    setMapLoading(true);
+    setError(null);
+    try {
+      const params = { next: '', size: MAP_FETCH_SIZE };
+      if (status && status !== ALL_STATUS) params.status = status;
+      if (search) params.search = search;
+      if (!bounds.wrapped) {
+        params.swLat = bounds.swLat;
+        params.swLng = bounds.swLng;
+        params.neLat = bounds.neLat;
+        params.neLng = bounds.neLng;
+      }
+
+      const res = await client.get('/admin/store/list', { params });
+      const list = Array.isArray(res.data?.results) ? res.data.results : [];
+
+      setData(list);
+      setNextCursor(null);
+      setHasMore(false);
+      setMapTruncated(!!res.data?.next);
+      setQueriedMapBounds(bounds);
+      mapQueriedRef.current = true;
+      setMapMoved(false);
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || '스토어 조회 실패';
+      setError(msg);
+      notification.error({ message: '조회 실패', description: msg });
+    } finally {
+      setMapLoading(false);
+    }
+  }, [notification]);
+
+  // 지도가 멈출 때마다 호출된다. 첫 멈춤이 초기 조회를 시작시키고,
+  // 그 뒤로는 사용자가 직접 '이 지역에서 재조회' 를 누를 때까지 조회하지 않는다.
+  const handleMapBoundsChange = useCallback((bounds) => {
+    latestMapBoundsRef.current = bounds;
+    if (!mapQueriedRef.current) {
+      fetchMapData(bounds, { status: statusFilter, search: searchKeyword });
+      return;
+    }
+    setMapMoved(true);
+  }, [fetchMapData, statusFilter, searchKeyword]);
+
+  const handleSearchHere = useCallback(() => {
+    fetchMapData(latestMapBoundsRef.current, { status: statusFilter, search: searchKeyword });
+  }, [fetchMapData, statusFilter, searchKeyword]);
+
   useEffect(() => {
-    fetchData({ status: statusFilter, search: searchKeyword });
-  }, [fetchData, searchKeyword, statusFilter]);
+    if (!isMapView) {
+      // 지도를 떠나면 다음 진입 때 지도가 자리를 잡은 영역으로 다시 조회하게 되돌린다.
+      mapQueriedRef.current = false;
+      setMapMoved(false);
+      fetchData({ status: statusFilter, search: searchKeyword });
+      return;
+    }
+    // 지도 뷰는 지도가 알려주는 영역 기준으로 조회한다. 영역은 그대로 두고 조건만 바뀐
+    // 경우 같은 영역으로 다시 조회하고, 지도가 아직 뜨기 전이면 첫 idle 이 조회를 시작시킨다.
+    if (mapQueriedRef.current && latestMapBoundsRef.current) {
+      fetchMapData(latestMapBoundsRef.current, { status: statusFilter, search: searchKeyword });
+    }
+  }, [fetchData, fetchMapData, searchKeyword, statusFilter, isMapView]);
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -942,11 +1036,11 @@ export default function Stores() {
     }
   }, [notification]);
 
-  const isMapView = listView === 'map';
-  // 국가·기간 필터는 주소/행사 기간이, 지도 뷰는 좌표가 필요한데 모두 목록 API 응답에 없다.
-  // 셋 중 하나라도 켜지면 스토어별 상세 조회로 목록을 보강해야 한다.
-  const needsDetailEnrichment = countryFilter !== 'ALL' || !!periodRange || isMapView;
-  const needsFullList = categoryFilter.length > 0 || needsDetailEnrichment;
+  // 국가·기간 필터는 주소/행사 기간이 필요한데, 좌표를 내려주지 않는 구버전 응답에서는
+  // 목록에 없다. 그때만 스토어별 상세 조회로 목록을 보강한다.
+  // (지도 뷰는 영역 조회로 최대 MAP_FETCH_SIZE 건만 받으므로 전체 조회를 하지 않는다.)
+  const needsDetailEnrichment = countryFilter !== 'ALL' || !!periodRange;
+  const needsFullList = !isMapView && (categoryFilter.length > 0 || needsDetailEnrichment);
   const activeAdvancedFilterCount = (categoryFilter.length > 0 ? 1 : 0)
     + (countryFilter !== 'ALL' ? 1 : 0)
     + (periodRange ? 1 : 0);
@@ -1008,11 +1102,12 @@ export default function Stores() {
     return true;
   });
 
-  // 지도 마커에 필요한 좌표는 목록 API 응답에 없어 상세 캐시에서 채운다.
+  // 지도 마커 좌표는 목록 응답에서 그대로 쓰고, 없는 구버전 응답에서만 상세 캐시로 채운다.
   const mapStores = filteredData
     .map((item) => {
       const meta = getStoreMeta(item, detailCache);
       if (meta?.latitude == null || meta?.longitude == null) return null;
+      if (!isWithinMapBounds(meta.latitude, meta.longitude, queriedMapBounds)) return null;
       return {
         storeId: item.storeId,
         title: item.title,
@@ -1023,7 +1118,8 @@ export default function Stores() {
         address: meta.address,
       };
     })
-    .filter(Boolean);
+    .filter(Boolean)
+    .slice(0, MAP_FETCH_SIZE);
 
   // 필터가 바뀌면 이전 페이지 번호가 새 결과 범위를 벗어날 수 있어 1페이지로 되돌린다.
   useEffect(() => {
@@ -1601,7 +1697,16 @@ export default function Stores() {
           status="warning"
           title="데이터를 불러올 수 없습니다"
           subTitle={error}
-          extra={<Button type="primary" onClick={() => fetchData({ status: statusFilter, search: searchKeyword })}>다시 시도</Button>}
+          extra={(
+            <Button
+              type="primary"
+              onClick={() => (isMapView
+                ? fetchMapData(latestMapBoundsRef.current, { status: statusFilter, search: searchKeyword })
+                : fetchData({ status: statusFilter, search: searchKeyword }))}
+            >
+              다시 시도
+            </Button>
+          )}
         />
       </div>
     );
@@ -1696,26 +1801,29 @@ export default function Stores() {
           showIcon
           message={loadingAll
             ? '전체 스토어 목록을 불러오는 중입니다...'
-            : isMapView
-              ? '지도에 표시할 스토어 좌표를 조회하는 중입니다...'
-              : '국가·기간 필터를 위해 스토어별 상세 정보를 조회하는 중입니다...'}
-          description="목록 API에 국가/행사 기간/좌표 정보가 없어 스토어마다 상세 조회를 거치는 임시 방식입니다. 스토어가 많으면 시간이 걸릴 수 있습니다."
+            : '국가·기간 필터를 위해 스토어별 상세 정보를 조회하는 중입니다...'}
+          description="국가·기간 필터는 목록 전체를 받아 걸러내므로 스토어가 많으면 시간이 걸릴 수 있습니다."
         />
       )}
       {isMapView ? (
         <>
           <StoreMap
             stores={mapStores}
-            loading={loading || loadingAll || enriching}
+            loading={mapLoading}
             onMarkerClick={handleOpenDetail}
             height={560}
             initialView={HONGDAE_DEFAULT_VIEW}
-            emptyText="조건에 맞는 스토어가 없거나 좌표 정보를 불러오지 못했습니다."
+            onBoundsChange={handleMapBoundsChange}
+            searchHereVisible={mapMoved}
+            onSearchHere={handleSearchHere}
+            searchHereLoading={mapLoading}
+            emptyText="이 지역에는 조건에 맞는 스토어가 없습니다. 지도를 옮겨 다시 조회해 보세요."
           />
           <Typography.Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
-            홍대 일대를 기본으로 보여줍니다. 지도를 움직이거나 축소하면 다른 지역 마커도 볼 수 있습니다.
-            {' '}총 {filteredData.length}건 중 {mapStores.length}건을 지도에 표시했습니다.
-            {filteredData.length > mapStores.length && ' (좌표를 불러오지 못한 스토어는 제외됩니다.)'}
+            화면에 보이는 영역의 스토어만 최대 {MAP_FETCH_SIZE}건까지 조회합니다.
+            {' '}지도를 옮기면 나타나는 &lsquo;이 지역에서 재조회&rsquo; 를 눌러 그 지역을 다시 불러옵니다.
+            {' '}현재 {mapStores.length}건을 표시했습니다.
+            {mapTruncated && ` 이 영역에 ${MAP_FETCH_SIZE}건이 넘는 스토어가 있어 일부만 보여줍니다. 지도를 확대해 주세요.`}
             {' '}마커를 클릭하면 상세 정보를 볼 수 있습니다.
           </Typography.Text>
         </>
