@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Empty, Spin, Typography } from 'antd';
+import { Button, Empty, Spin, Typography } from 'antd';
 import styled from 'styled-components';
 import { MarkerClusterer } from '@googlemaps/markerclusterer';
 import { getGoogleMapId, getGoogleMapsApiKey, importGoogleMapsLibraries } from '../utils/googleMaps';
@@ -28,6 +28,16 @@ const MapWrapper = styled.div`
     padding: 16px;
     text-align: center;
     background: rgba(255, 255, 255, 0.72);
+    /* 조회 결과가 없어도 지도는 계속 움직일 수 있어야 다른 지역을 찾아볼 수 있다. */
+    pointer-events: none;
+  }
+
+  .store-map-search-here {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2;
   }
 
   .store-map-infowindow {
@@ -85,6 +95,12 @@ export default function StoreMap({
   emptyText = '표시할 좌표가 없습니다.',
   // { center: { lat, lng }, zoom } 을 주면 마커 전체에 맞추는 대신 이 시야로 고정한다.
   initialView = null,
+  // 지도가 멈출 때마다 현재 보이는 영역을 { swLat, swLng, neLat, neLng, wrapped } 로 알려준다.
+  onBoundsChange = null,
+  // 참이면 지도 위에 '이 지역에서 재조회' 버튼을 띄운다.
+  searchHereVisible = false,
+  onSearchHere = null,
+  searchHereLoading = false,
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -93,12 +109,14 @@ export default function StoreMap({
   const clustererRef = useRef(null);
   const librariesRef = useRef(null);
   const onMarkerClickRef = useRef(onMarkerClick);
+  const onBoundsChangeRef = useRef(onBoundsChange);
   const storesRef = useRef(stores);
   const initialViewRef = useRef(initialView);
   const [mapReady, setMapReady] = useState(false);
   const [loadError, setLoadError] = useState(null);
 
   onMarkerClickRef.current = onMarkerClick;
+  onBoundsChangeRef.current = onBoundsChange;
   storesRef.current = stores;
 
   const validStores = stores.filter(hasValidPosition);
@@ -131,6 +149,22 @@ export default function StoreMap({
           fullscreenControl: true,
         });
         infoWindowRef.current = new libraries.InfoWindow();
+        // 지도가 멈출 때(초기 표시 포함)마다 보이는 영역을 부모에 알린다.
+        // 부모는 이 영역으로 스토어를 조회하므로, 첫 조회도 이 이벤트가 시작시킨다.
+        mapRef.current.addListener('idle', () => {
+          const bounds = mapRef.current?.getBounds();
+          if (!bounds || !onBoundsChangeRef.current) return;
+          const sw = bounds.getSouthWest();
+          const ne = bounds.getNorthEast();
+          onBoundsChangeRef.current({
+            swLat: sw.lat(),
+            swLng: sw.lng(),
+            neLat: ne.lat(),
+            neLng: ne.lng(),
+            // 날짜변경선을 걸친 시야는 경도 범위가 뒤집힌다. 이 경우 영역 조회를 쓸 수 없다.
+            wrapped: sw.lng() > ne.lng(),
+          });
+        });
         // 스토어가 홍대 등 특정 상권에 밀집해 마커가 서로 가려지므로 줌 레벨별로 묶어준다.
         // 클러스터를 클릭하면 기본 핸들러가 해당 묶음 범위로 확대한다.
         clustererRef.current = new MarkerClusterer({ map: mapRef.current });
@@ -221,6 +255,17 @@ export default function StoreMap({
   return (
     <MapWrapper style={{ height }}>
       <div ref={containerRef} className="store-map-canvas" />
+      {searchHereVisible && mapReady && !loadError && (
+        <Button
+          className="store-map-search-here"
+          type="primary"
+          size="small"
+          loading={searchHereLoading}
+          onClick={onSearchHere}
+        >
+          이 지역에서 재조회
+        </Button>
+      )}
       {showOverlay && (
         <div className="store-map-overlay">
           {loadError
