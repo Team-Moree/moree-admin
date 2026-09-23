@@ -32,6 +32,10 @@ const TYPE_MAP = {
 // 구버전 응답(type 미포함) 호환: 값이 없으면 개별 대상(CHARACTER)으로 간주한다.
 const targetTypeOf = (record) => record?.type || 'CHARACTER';
 
+// 한 번에 받는 건수. 예전에는 100건씩 끝까지(5천 건 = 50여 번) 순차 호출해 화면이 몇 초씩 멈췄다.
+// 스토어 화면과 같이 첫 페이지만 받고, 필요할 때 "더 불러오기"로 이어 받는다.
+const PAGE_SIZE = 50;
+
 const CATEGORY_COLORS = {
   CHARACTER: 'magenta',
   IDOL: 'purple',
@@ -47,10 +51,13 @@ const CATEGORY_COLORS = {
 export default function FandomTargets() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(''); // 입력 중인 검색어
+  const [searchKeyword, setSearchKeyword] = useState(undefined); // 서버에 적용된 검색어
   const [statusFilter, setStatusFilter] = useState(undefined);
   const [typeFilter, setTypeFilter] = useState(undefined);
   const [noWorkOnly, setNoWorkOnly] = useState(false);
+  const [nextCursor, setNextCursor] = useState(null);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState(null);
 
   // 수정 모달
@@ -78,34 +85,26 @@ export default function FandomTargets() {
     }
   };
 
-  // 커서 페이지네이션으로 목록을 끝까지 조회한다.
-  // 상태·유형 필터는 서버가 처리하므로 그대로 넘긴다. 어드민 조회 API 에 검색 파라미터는
-  // 없으므로 이름·소스 검색만 받아온 뒤 클라이언트에서 거른다.
-  // 서버는 작품(WORK)을 앞에, 그 뒤로 id 오름차순으로 반환하며 이 순서를 그대로 유지한다.
-  const fetchData = useCallback(async (filters = {}) => {
+  // 서버 커서 페이지네이션. 상태·유형·작품없음·검색은 모두 서버가 거르고,
+  // 작품(WORK)을 앞에, 그 뒤로 id 오름차순으로 돌려주므로 그 순서를 그대로 보여준다.
+  // append 가 true 면 "더 불러오기"로 다음 페이지를 이어 붙인다.
+  const fetchData = useCallback(async ({
+    cursor = '', status, type, noWork, search: keyword, append = false,
+  } = {}) => {
     setLoading(true);
     setError(null);
     try {
-      const PAGE_SIZE = 100;
-      const MAX_PAGES = 1000; // 무한루프 방지 안전장치 (최대 10만 건)
-      const all = [];
-      let next = '';
-      for (let page = 0; page < MAX_PAGES; page += 1) {
-        const params = { next, size: PAGE_SIZE };
-        if (filters.status) params.status = filters.status;
-        if (filters.type) params.type = filters.type;
-        // 소속 작품이 없는 대상만 보기 — 미분류 정리용이라 어드민 조회에만 있는 필터다.
-        if (filters.noWork) params.noWork = true;
-        const res = await client.get('/admin/fandom-target', { params });
-        const list = Array.isArray(res.data?.results)
-          ? res.data.results
-          : Array.isArray(res.data) ? res.data : [];
-        all.push(...list);
-        const nextCursor = res.data?.next;
-        if (!nextCursor || list.length === 0) break;
-        next = nextCursor;
-      }
-      setData(all);
+      const params = { next: cursor, size: PAGE_SIZE };
+      if (status) params.status = status;
+      if (type) params.type = type;
+      // 소속 작품이 없는 대상만 보기 — 미분류 정리용이라 어드민 조회에만 있는 필터다.
+      if (noWork) params.noWork = true;
+      if (keyword) params.search = keyword;
+      const res = await client.get('/admin/fandom-target', { params });
+      const list = Array.isArray(res.data?.results) ? res.data.results : [];
+      setData((prev) => (append ? [...prev, ...list] : list));
+      setNextCursor(res.data?.next || null);
+      setHasMore(!!res.data?.next);
     } catch (err) {
       const msg = err.response?.data?.message || err.message || '덕질 대상 조회 실패';
       setError(msg);
@@ -120,11 +119,12 @@ export default function FandomTargets() {
     fetchCategories();
   }, []);
 
-  // 필터가 바뀌면 서버에서 다시 받아온다. setState 는 비동기라 바뀐 값을 직접 넘긴다.
+  // 필터·검색어가 바뀌면 첫 페이지부터 다시 받아온다. setState 는 비동기라 바뀐 값을 직접 넘긴다.
   const reload = (override = {}) => fetchData({
     status: statusFilter,
     type: typeFilter,
     noWork: noWorkOnly,
+    search: searchKeyword,
     ...override,
   });
 
@@ -143,17 +143,27 @@ export default function FandomTargets() {
     reload({ noWork: checked });
   };
 
-  // 유형 필터는 서버에서 이미 적용됐으므로, 여기서는 검색어만 거른다.
-  // 검색은 서버 검색과 동일하게 이름과 소스를 모두 대상으로 한다.
-  const filteredData = useMemo(() => {
-    const keyword = search.trim().toLowerCase();
-    return data.filter((item) => {
-      if (!keyword) return true;
-      return `${item.name || ''} ${item.source || ''}`.toLowerCase().includes(keyword);
-    });
-  }, [data, search, typeFilter]);
+  // 검색은 서버가 이름·소스 부분 일치(대소문자 무시)로 처리한다. Enter/검색 버튼/지우기에서 적용된다.
+  const handleSearch = (value) => {
+    const trimmed = (value || '').trim();
+    setSearch(trimmed);
+    setSearchKeyword(trimmed || undefined);
+    reload({ search: trimmed || undefined });
+  };
 
-  // 유형별 건수 (작품 승격으로 늘어난 대상 규모를 헤더에서 바로 확인)
+  const handleLoadMore = () => {
+    if (!nextCursor || loading) return;
+    fetchData({
+      cursor: nextCursor,
+      status: statusFilter,
+      type: typeFilter,
+      noWork: noWorkOnly,
+      search: searchKeyword,
+      append: true,
+    });
+  };
+
+  // 불러온 범위의 유형별 건수 (작품 승격으로 늘어난 대상 규모를 헤더에서 바로 확인)
   const typeCounts = useMemo(
     () => data.reduce((acc, item) => {
       const type = targetTypeOf(item);
@@ -337,7 +347,7 @@ export default function FandomTargets() {
         <Space align="baseline" wrap>
           <Typography.Title level={4} style={{ margin: 0 }}>덕질 대상 관리</Typography.Title>
           <Typography.Text type="secondary">
-            {`조회된 ${data.length}건 — 작품 ${typeCounts.WORK || 0} · 캐릭터 ${typeCounts.CHARACTER || 0}`}
+            {`불러온 ${data.length}건${hasMore ? '+' : ''} — 작품 ${typeCounts.WORK || 0} · 캐릭터 ${typeCounts.CHARACTER || 0}`}
           </Typography.Text>
         </Space>
         <Space wrap>
@@ -375,7 +385,7 @@ export default function FandomTargets() {
             prefix={<SearchOutlined />}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            onSearch={setSearch}
+            onSearch={handleSearch}
             style={{ width: 300 }}
             allowClear
           />
@@ -384,11 +394,22 @@ export default function FandomTargets() {
 
       <Table
         columns={columns}
-        dataSource={filteredData}
+        dataSource={data}
         rowKey="fandomTargetId"
         loading={loading}
-        pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `총 ${t}건` }}
+        pagination={{
+          pageSize: 20,
+          showSizeChanger: true,
+          showTotal: (t) => `불러온 ${t}건${hasMore ? ' (더 있음)' : ''}`,
+        }}
         size="middle"
+        footer={() =>
+          hasMore ? (
+            <Button type="link" onClick={handleLoadMore} loading={loading}>
+              더 불러오기
+            </Button>
+          ) : null
+        }
       />
 
       {/* 수정 모달 */}
