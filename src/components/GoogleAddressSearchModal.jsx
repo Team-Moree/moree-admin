@@ -1,24 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Modal, App } from 'antd';
-
-let googleMapsScriptPromise;
-
-const loadGoogleMaps = (apiKey) => {
-  if (window.google?.maps?.places?.Autocomplete) return Promise.resolve();
-
-  if (!googleMapsScriptPromise) {
-    googleMapsScriptPromise = new Promise((resolve, reject) => {
-      window.__initGoogleMaps = resolve;
-      const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&loading=async&callback=__initGoogleMaps`;
-      script.async = true;
-      script.onerror = reject;
-      document.head.appendChild(script);
-    });
-  }
-
-  return googleMapsScriptPromise;
-};
+import { getGoogleMapsApiKey, loadGoogleMaps } from '../utils/googleMaps';
 
 const extractZip = (addressComponents = []) => {
   const postal = addressComponents.find((component) => component.types?.includes('postal_code'));
@@ -58,7 +40,7 @@ export default function GoogleAddressSearchModal({ open, onClose, onSelect }) {
     setLoading(true);
 
     const setup = async () => {
-      const apiKey = import.meta.env.VITE_GOOGLE_MAPS_KEY;
+      const apiKey = getGoogleMapsApiKey();
       if (!apiKey) {
         notification.error({
           message: '주소 검색 설정 필요',
