@@ -22,6 +22,9 @@
 // UNKNOWN은 매핑되지 않은 요청(404/스캐너 등)이 뭉뚱그려지는 버킷이라 특정 엔드포인트로 액션 불가 -> 제외.
 // social-login은 외부 OAuth 왕복 호출이 껴서 원래도 느린 게 정상이라 -> 다른 API와 같은 척도로 비교하면 왜곡됨.
 const NOISE_URI_FILTER = 'uri!~"/actuator.*|/health|/swagger-ui.*|/v3/api-docs.*|UNKNOWN|/auth/social-login"';
+// 한 번에 동시에 보낼 Prometheus 쿼리 수. 14개를 전부 한번에 보내면 Grafana Cloud가 503으로
+// 끊길 때가 있어 이 수만큼만 동시에 보낸다.
+const METRICS_QUERY_CONCURRENCY = 4;
 
 class HttpError extends Error {
   constructor(status, code, message) {
@@ -94,6 +97,21 @@ async function queryRange(config, expr, { start, end, step }) {
   }));
 }
 
+// Grafana Cloud 데이터소스 프록시에 한꺼번에 너무 많은 동시 쿼리를 보내면 503(레이트리밋으로
+// 추정)이 남 -> thunk 배열을 동시 limit개씩만 실행한다.
+async function runLimited(thunks, limit) {
+  const results = new Array(thunks.length);
+  let i = 0;
+  async function worker() {
+    while (i < thunks.length) {
+      const idx = i++;
+      results[idx] = await thunks[idx]();
+    }
+  }
+  await Promise.all(Array.from({ length: limit }, worker));
+  return results;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
@@ -128,65 +146,80 @@ export default async function handler(req, res) {
       heapUsageInstant,
       heapUsageRange,
       gcOverheadRange,
-    ] = await Promise.all([
-      queryRange(
-        config,
-        `max by (uri) (max_over_time(http_server_requests_seconds{quantile="0.95", ${NOISE_URI_FILTER}}[${lookback}s]))`,
-        { start, end: now, step }
-      ),
-      queryInstant(
-        config,
-        `topk(10, max by (uri) (max_over_time(http_server_requests_seconds{quantile="0.95", ${NOISE_URI_FILTER}}[${rangeHours}h])))`
-      ),
-      queryInstant(
-        config,
-        `max(max_over_time(http_server_requests_seconds{quantile="0.95", ${NOISE_URI_FILTER}}[${rangeHours}h]))`
-      ),
-      queryInstant(
-        config,
-        '100 * sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) / sum(rate(http_server_requests_seconds_count[5m]))'
-      ),
-      queryRange(
-        config,
-        '100 * sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) / sum(rate(http_server_requests_seconds_count[5m]))',
-        { start, end: now, step }
-      ),
-      queryInstant(
-        config,
-        '100 * sum(rate(http_server_requests_seconds_count{status=~"4.."}[5m])) / sum(rate(http_server_requests_seconds_count[5m]))'
-      ),
-      // 스레드/커넥션/힙 사용량도 순간 게이지라 p95와 같은 이유로 max_over_time 사용 —
-      // 짧게 쓰고 반납되는 리소스는 스크레이프 순간에 우연히 안 잡히면 계속 0%로 보인다.
-      queryInstant(
-        config,
-        `100 * max_over_time(tomcat_threads_busy_threads[${rangeHours}h]) / tomcat_threads_config_max_threads`
-      ),
-      queryRange(
-        config,
-        `100 * max_over_time(tomcat_threads_busy_threads[${lookback}s]) / tomcat_threads_config_max_threads`,
-        { start, end: now, step }
-      ),
-      queryInstant(
-        config,
-        `100 * max_over_time(hikaricp_connections_active[${rangeHours}h]) / hikaricp_connections_max`
-      ),
-      queryRange(
-        config,
-        `100 * max_over_time(hikaricp_connections_active[${lookback}s]) / hikaricp_connections_max`,
-        { start, end: now, step }
-      ),
-      queryInstant(config, `max_over_time(hikaricp_connections_pending[${rangeHours}h])`),
-      queryInstant(
-        config,
-        `100 * sum(max_over_time(jvm_memory_used_bytes{area="heap"}[${rangeHours}h])) / sum(jvm_memory_max_bytes{area="heap"})`
-      ),
-      queryRange(
-        config,
-        `100 * sum(max_over_time(jvm_memory_used_bytes{area="heap"}[${lookback}s])) / sum(jvm_memory_max_bytes{area="heap"})`,
-        { start, end: now, step }
-      ),
-      queryRange(config, `max_over_time(jvm_gc_overhead[${lookback}s])`, { start, end: now, step }),
-    ]);
+    ] = await runLimited(
+      [
+        () =>
+          queryRange(
+            config,
+            `max by (uri) (max_over_time(http_server_requests_seconds{quantile="0.95", ${NOISE_URI_FILTER}}[${lookback}s]))`,
+            { start, end: now, step }
+          ),
+        () =>
+          queryInstant(
+            config,
+            `topk(10, max by (uri) (max_over_time(http_server_requests_seconds{quantile="0.95", ${NOISE_URI_FILTER}}[${rangeHours}h])))`
+          ),
+        () =>
+          queryInstant(
+            config,
+            `max(max_over_time(http_server_requests_seconds{quantile="0.95", ${NOISE_URI_FILTER}}[${rangeHours}h]))`
+          ),
+        () =>
+          queryInstant(
+            config,
+            '100 * sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) / sum(rate(http_server_requests_seconds_count[5m]))'
+          ),
+        () =>
+          queryRange(
+            config,
+            '100 * sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) / sum(rate(http_server_requests_seconds_count[5m]))',
+            { start, end: now, step }
+          ),
+        () =>
+          queryInstant(
+            config,
+            '100 * sum(rate(http_server_requests_seconds_count{status=~"4.."}[5m])) / sum(rate(http_server_requests_seconds_count[5m]))'
+          ),
+        // 스레드/커넥션/힙 사용량도 순간 게이지라 p95와 같은 이유로 max_over_time 사용 —
+        // 짧게 쓰고 반납되는 리소스는 스크레이프 순간에 우연히 안 잡히면 계속 0%로 보인다.
+        () =>
+          queryInstant(
+            config,
+            `100 * max_over_time(tomcat_threads_busy_threads[${rangeHours}h]) / tomcat_threads_config_max_threads`
+          ),
+        () =>
+          queryRange(
+            config,
+            `100 * max_over_time(tomcat_threads_busy_threads[${lookback}s]) / tomcat_threads_config_max_threads`,
+            { start, end: now, step }
+          ),
+        () =>
+          queryInstant(
+            config,
+            `100 * max_over_time(hikaricp_connections_active[${rangeHours}h]) / hikaricp_connections_max`
+          ),
+        () =>
+          queryRange(
+            config,
+            `100 * max_over_time(hikaricp_connections_active[${lookback}s]) / hikaricp_connections_max`,
+            { start, end: now, step }
+          ),
+        () => queryInstant(config, `max_over_time(hikaricp_connections_pending[${rangeHours}h])`),
+        () =>
+          queryInstant(
+            config,
+            `100 * sum(max_over_time(jvm_memory_used_bytes{area="heap"}[${rangeHours}h])) / sum(jvm_memory_max_bytes{area="heap"})`
+          ),
+        () =>
+          queryRange(
+            config,
+            `100 * sum(max_over_time(jvm_memory_used_bytes{area="heap"}[${lookback}s])) / sum(jvm_memory_max_bytes{area="heap"})`,
+            { start, end: now, step }
+          ),
+        () => queryRange(config, `max_over_time(jvm_gc_overhead[${lookback}s])`, { start, end: now, step }),
+      ],
+      METRICS_QUERY_CONCURRENCY
+    );
 
     return res.status(200).json({
       range: { start, end: now, rangeHours },
