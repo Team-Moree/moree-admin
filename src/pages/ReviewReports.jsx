@@ -17,6 +17,7 @@ import {
 import { EditOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import client from '../api/client';
+import { parsePagedResponse } from '../utils/pagedList';
 
 const Header = styled.div`
   display: flex;
@@ -271,8 +272,10 @@ export default function ReviewReports() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [processedFilter, setProcessedFilter] = useState(UNPROCESSED_FILTER);
-  const [nextCursor, setNextCursor] = useState(null);
+  const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [tablePage, setTablePage] = useState(1);
+  const [tablePageSize, setTablePageSize] = useState(20);
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detail, setDetail] = useState(null);
@@ -281,21 +284,21 @@ export default function ReviewReports() {
 
   const { notification } = App.useApp();
 
-  const fetchData = useCallback(async (cursor = '') => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await client.get('/admin/review/report/list', {
         params: {
           isProcessed: getProcessedParam(processedFilter),
-          next: cursor,
+          page: 1,
           size: PAGE_SIZE,
         },
       });
-      const list = Array.isArray(res.data?.results) ? res.data.results : [];
-      setData((prev) => (cursor ? [...prev, ...list] : list));
-      setNextCursor(res.data?.next || null);
-      setHasMore(!!res.data?.next);
+      const { results: list, total: serverTotal } = parsePagedResponse(res);
+      setData(list);
+      setTotal(serverTotal);
+      setHasMore(list.length < serverTotal);
     } catch (err) {
       const msg = err.response?.data?.message || err.message || '리뷰 신고 조회 실패';
       setError(msg);
@@ -304,6 +307,34 @@ export default function ReviewReports() {
       setLoading(false);
     }
   }, [notification, processedFilter]);
+
+  // 서버가 page/size로 임의 지점을 바로 조회해주므로, 필요한 분량을 한 번에 받아온다.
+  const ensureDataForPage = useCallback(async (page, pageSize) => {
+    const needed = page * pageSize;
+    if (data.length >= needed || !hasMore) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await client.get('/admin/review/report/list', {
+        params: {
+          isProcessed: getProcessedParam(processedFilter),
+          page: 1,
+          size: needed,
+        },
+      });
+      const { results: list, total: serverTotal } = parsePagedResponse(res);
+      setData(list);
+      setTotal(serverTotal);
+      setHasMore(list.length < serverTotal);
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || '리뷰 신고 조회 실패';
+      setError(msg);
+      notification.error({ message: '조회 실패', description: msg });
+    } finally {
+      setLoading(false);
+    }
+  }, [data, hasMore, processedFilter, notification]);
 
   const fetchDetail = useCallback(async (reportId) => {
     setDetailLoading(true);
@@ -322,6 +353,10 @@ export default function ReviewReports() {
     fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    setTablePage(1);
+  }, [processedFilter]);
+
   const openDetail = (record) => {
     setDetail(record);
     setDetailOpen(true);
@@ -331,11 +366,6 @@ export default function ReviewReports() {
   const closeDetail = () => {
     setDetailOpen(false);
     setDetail(null);
-  };
-
-  const handleLoadMore = () => {
-    if (!nextCursor || loading) return;
-    fetchData(nextCursor);
   };
 
   const handleProcess = async (record, action) => {
@@ -578,15 +608,19 @@ export default function ReviewReports() {
         rowKey="id"
         loading={loading}
         rowClassName={(record) => (!record.isProcessed ? 'unprocessed-report-row' : '')}
-        pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => `총 ${total}건` }}
+        pagination={{
+          current: tablePage,
+          pageSize: tablePageSize,
+          total,
+          showSizeChanger: true,
+          showTotal: (count) => `총 ${count}건`,
+          onChange: async (page, pageSize) => {
+            await ensureDataForPage(page, pageSize);
+            setTablePage(page);
+            setTablePageSize(pageSize);
+          },
+        }}
         size="middle"
-        footer={() =>
-          hasMore ? (
-            <Button type="link" onClick={handleLoadMore} loading={loading}>
-              더 불러오기
-            </Button>
-          ) : null
-        }
       />
 
       <Modal
