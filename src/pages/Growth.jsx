@@ -99,18 +99,20 @@ function CoverageAlert({ data }) {
     );
   }
   if (data.previousPeriod.complete) return null;
-  const comparableFrom = dayjs(data.trackingStartDate).add(60, 'day');
+  const start = dayjs(data.trackingStartDate);
+  const parts = [];
+  if (!data.period.complete) parts.push('최근 30일이 아직 다 안 쌓여서 MAU 가 실제보다 낮게 나옴.');
+  if (data.dau.previousValue == null) {
+    parts.push(`DAU 증감률(30일 전 같은 날과 비교)은 ${formatDate(start.add(31, 'day'))} 부터 나옴.`);
+  }
+  parts.push(`MAU·평균 DAU 증감률(직전 30일과 비교)은 ${formatDate(start.add(60, 'day'))} 부터 나옴.`);
   return (
     <Alert
       type="info"
       showIcon
       style={{ marginBottom: 16 }}
       message={`집계 시작일 ${formatDate(data.trackingStartDate)}`}
-      description={
-        data.period.complete
-          ? `전월 대비 증감률은 직전 30일이 모두 쌓이는 ${formatDate(comparableFrom)} 부터 나옴.`
-          : `최근 30일이 아직 다 안 쌓여서 MAU 가 실제보다 낮게 나옴. 전월 대비 증감률은 ${formatDate(comparableFrom)} 부터 나옴.`
-      }
+      description={parts.join(' ')}
     />
   );
 }
