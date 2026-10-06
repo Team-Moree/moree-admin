@@ -5,6 +5,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Analytics from './pages/Analytics';
 import Metrics from './pages/Metrics';
+import Growth from './pages/Growth';
 import FandomCategories from './pages/FandomCategories';
 import FandomTargets from './pages/FandomTargets';
 import StoreReports from './pages/StoreReports';
@@ -32,6 +33,7 @@ export default function App() {
               <ErrorBoundary>
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
+                  <Route path="/growth" element={<Growth />} />
                   <Route path="/analytics" element={<Analytics />} />
                   <Route path="/metrics" element={<Metrics />} />
                   <Route path="/fandom-categories" element={<FandomCategories />} />
