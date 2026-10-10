@@ -7,6 +7,7 @@ import { EditOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import client from '../api/client';
 import GoogleAddressSearchModal from '../components/GoogleAddressSearchModal';
+import { parsePagedResponse } from '../utils/pagedList';
 import {
   FEEDBACK_TABS,
   buildStoreApplyRequest,
@@ -220,8 +221,10 @@ export default function StoreReports() {
   const [error, setError] = useState(null);
   const [activeFeedbackType, setActiveFeedbackType] = useState(FEEDBACK_TABS.REPORT);
   const [processedFilter, setProcessedFilter] = useState(UNPROCESSED_FILTER);
-  const [nextCursor, setNextCursor] = useState(null);
+  const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [tablePage, setTablePage] = useState(1);
+  const [tablePageSize, setTablePageSize] = useState(20);
   const [detail, setDetail] = useState(null);
   const [storeDetailLoading, setStoreDetailLoading] = useState(false);
   const [storeDetailLoaded, setStoreDetailLoaded] = useState(false);
@@ -248,26 +251,24 @@ export default function StoreReports() {
   }, [fetchCategories]);
 
   const fetchData = useCallback(async ({
-    cursor = '',
     type = activeFeedbackType,
     processed = processedFilter,
-    append = false,
   } = {}) => {
     setLoading(true);
     setError(null);
     try {
-      const params = { next: cursor, size: PAGE_SIZE };
+      const params = { page: 1, size: PAGE_SIZE };
       const isProcessed = getProcessedParam(processed);
 
       if (isProcessed !== undefined) params.isProcessed = isProcessed;
 
       const res = await client.get(getStoreFeedbackListEndpoint(type), { params });
-      const results = Array.isArray(res.data?.results) ? res.data.results : [];
+      const { results, total: serverTotal } = parsePagedResponse(res);
       const list = normalizeStoreFeedbackItems(results, type);
 
-      setData((prev) => (append ? [...prev, ...list] : list));
-      setNextCursor(res.data?.next || null);
-      setHasMore(!!res.data?.next);
+      setData(list);
+      setTotal(serverTotal);
+      setHasMore(list.length < serverTotal);
     } catch (err) {
       const msg = err.response?.data?.message || err.message || '스토어 신고/수정 조회 실패';
       setError(msg);
@@ -281,15 +282,42 @@ export default function StoreReports() {
     fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    setTablePage(1);
+  }, [activeFeedbackType, processedFilter]);
+
   const sortedData = useMemo(
     () => sortStoreFeedbackItems(data, activeFeedbackType),
     [activeFeedbackType, data],
   );
 
-  const handleLoadMore = () => {
-    if (!nextCursor || loading) return;
-    fetchData({ cursor: nextCursor, append: true });
-  };
+  // 서버가 page/size로 임의 지점을 바로 조회해주므로, 필요한 분량을 한 번에 받아온다.
+  const ensureDataForPage = useCallback(async (page, pageSize) => {
+    const needed = page * pageSize;
+    if (data.length >= needed || !hasMore) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const params = { page: 1, size: needed };
+      const isProcessed = getProcessedParam(processedFilter);
+      if (isProcessed !== undefined) params.isProcessed = isProcessed;
+
+      const res = await client.get(getStoreFeedbackListEndpoint(activeFeedbackType), { params });
+      const { results, total: serverTotal } = parsePagedResponse(res);
+      const list = normalizeStoreFeedbackItems(results, activeFeedbackType);
+
+      setData(list);
+      setTotal(serverTotal);
+      setHasMore(list.length < serverTotal);
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || '스토어 신고/수정 조회 실패';
+      setError(msg);
+      notification.error({ message: '조회 실패', description: msg });
+    } finally {
+      setLoading(false);
+    }
+  }, [data, hasMore, activeFeedbackType, processedFilter, notification]);
 
   const handleCloseDetail = () => {
     setDetail(null);
@@ -301,7 +329,7 @@ export default function StoreReports() {
   const handleTabChange = (nextType) => {
     handleCloseDetail();
     setData([]);
-    setNextCursor(null);
+    setTotal(0);
     setHasMore(false);
     setActiveFeedbackType(nextType);
   };
@@ -918,15 +946,19 @@ export default function StoreReports() {
         rowKey={getRowKey}
         loading={loading}
         rowClassName={(record) => (!record.isProcessed ? 'unprocessed-feedback-row' : '')}
-        pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => `총 ${total}건` }}
+        pagination={{
+          current: tablePage,
+          pageSize: tablePageSize,
+          total,
+          showSizeChanger: true,
+          showTotal: (count) => `총 ${count}건`,
+          onChange: async (page, pageSize) => {
+            await ensureDataForPage(page, pageSize);
+            setTablePage(page);
+            setTablePageSize(pageSize);
+          },
+        }}
         size="middle"
-        footer={() =>
-          hasMore ? (
-            <Button type="link" onClick={handleLoadMore} loading={loading}>
-              더 불러오기
-            </Button>
-          ) : null
-        }
       />
       <Modal
         title={detail?.feedbackType === 'REPORT' ? '스토어 신고 관리' : '스토어 수정 요청 관리'}

@@ -5,6 +5,7 @@ import {
   DashboardOutlined,
   BarChartOutlined,
   LineChartOutlined,
+  RiseOutlined,
   TagsOutlined,
   AimOutlined,
   ShopOutlined,
@@ -53,6 +54,7 @@ const StyledContent = styled(Content)`
 
 const menuItems = [
   { key: '/', icon: <DashboardOutlined />, label: '대시보드' },
+  { key: '/growth', icon: <RiseOutlined />, label: '핵심 성장 지표' },
   { key: '/analytics', icon: <BarChartOutlined />, label: 'GA 분석' },
   { key: '/fandom-categories', icon: <TagsOutlined />, label: '팬덤 카테고리' },
   { key: '/fandom-targets', icon: <AimOutlined />, label: '팬덤 타겟' },
