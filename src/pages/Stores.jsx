@@ -1001,7 +1001,8 @@ export default function Stores() {
     try {
       const res = await client.get(`/admin/store/${storeId}`);
       setDetail(res.data);
-      setPendingHasGacha(!!res.data?.hasGacha);
+      // 승인 시 아이템 뽑기는 기본 ON — 꺼진 채로 저장된 값을 그대로 승인에 끌어오지 않는다.
+      setPendingHasGacha(res.data?.approvalStatus === 'PENDING' ? true : !!res.data?.hasGacha);
     } catch (err) {
       const msg = err.response?.data?.message || err.message || '스토어 상세 조회 실패';
       notification.error({ message: '상세 조회 실패', description: msg });
@@ -1073,7 +1074,7 @@ export default function Stores() {
       commonClose: '20:00',
       operationHours: WEEKDAYS.map(() => ({ isActive: true, open: '10:00', close: '20:00' })),
       operationDates: [],
-      hasGacha: false,
+      hasGacha: true,
       keywords: [],
       links: [],
     });
