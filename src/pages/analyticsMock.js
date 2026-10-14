@@ -16,21 +16,59 @@ export function buildMockOverview(range) {
     return { date: s.add(i, 'day').format('YYYY-MM-DD'), activeUsers, newUsers };
   });
 
+  const rollingDaily = dailyUsers.map((d, i) => ({
+    date: d.date,
+    dau: Math.round(d.activeUsers * 0.35),
+    wau: Math.round(d.activeUsers * 1.6 + i * 3),
+    mau: Math.round(d.activeUsers * 4.2 + i * 9),
+  }));
+  const lastRolling = rollingDaily[rollingDaily.length - 1];
+  const dailySignUps = dailyUsers.map((d) => ({ date: d.date, count: Math.max(0, Math.round(d.newUsers * 0.3)) }));
+  const mockNewUsers = dailySignUps.reduce((a, d) => a + d.count, 0);
+
   return {
+    // [MOCK] 백엔드 /admin/dashboard/users 응답과 같은 스키마
+    mockUserStats: {
+      startDate: s.format('YYYY-MM-DD'),
+      endDate: e.format('YYYY-MM-DD'),
+      activeUsers: 1480,
+      withdrawalPendingUsers: 6,
+      newUsers: mockNewUsers,
+      previousNewUsers: Math.round(mockNewUsers * 0.86),
+      withdrawnUsers: 11,
+      dailySignUps,
+      signUpMethods: [
+        { provider: 'APPLE', count: Math.round(mockNewUsers * 0.55) },
+        { provider: 'GOOGLE', count: Math.round(mockNewUsers * 0.38) },
+        { provider: 'X', count: Math.round(mockNewUsers * 0.07) },
+      ],
+    },
+    channels: [
+      { channel: 'Direct', sessions: 4210, activeUsers: 1620, newUsers: 380 },
+      { channel: 'Organic Social', sessions: 2140, activeUsers: 880, newUsers: 310 },
+      { channel: 'Referral', sessions: 1290, activeUsers: 470, newUsers: 160 },
+      { channel: 'Organic Search', sessions: 820, activeUsers: 340, newUsers: 90 },
+    ],
+    activeUsersRolling: {
+      asOf: lastRolling.date,
+      dau: lastRolling.dau,
+      wau: lastRolling.wau,
+      mau: lastRolling.mau,
+      stickiness: Number(((lastRolling.dau / lastRolling.mau) * 100).toFixed(1)),
+      daily: rollingDaily,
+    },
     dateRange: { startDate: s.format('YYYY-MM-DD'), endDate: e.format('YYYY-MM-DD') },
     userTotals: { activeUsers: 3120, newUsers: 940, totalUsers: 5280, sessions: 8760 },
-    keyEventCounts: { first_open: 940, sign_up: 512, login: 3180, review_submit: 128 },
+    keyEventCounts: { first_open: 940, screen_view: 9620, tap: 1880, search: 640, sign_up: 0, login: 0, guest_login: 0, add_bookmark: 0, review_submit: 0, push_open: 0 },
+    pendingEvents: ['sign_up', 'login', 'guest_login', 'add_bookmark', 'review_submit', 'push_open'],
+    appEventCounts: { firstOpen: 940, explorationViews: 5240, storeDetailViews: 4380, search: 640, searchResultTaps: 1460, shareTaps: 420 },
     topEvents: [
-      { eventName: 'screen_view', eventCount: 18420 },
+      { eventName: 'user_engagement', eventCount: 21400 },
+      { eventName: 'screen_view', eventCount: 9620 },
       { eventName: 'session_start', eventCount: 8760 },
-      { eventName: 'tap', eventCount: 7340 },
-      { eventName: 'impression', eventCount: 5210 },
-      { eventName: 'login', eventCount: 3180 },
-      { eventName: 'view_item', eventCount: 2960 },
+      { eventName: 'tap', eventCount: 1880 },
       { eventName: 'first_open', eventCount: 940 },
       { eventName: 'search', eventCount: 640 },
-      { eventName: 'store_share', eventCount: 214 },
-      { eventName: 'review_submit', eventCount: 128 },
     ],
     dailyUsers,
     platforms: [
@@ -38,13 +76,8 @@ export function buildMockOverview(range) {
       { platform: 'Android', activeUsers: 1340, newUsers: 420 },
     ],
     topScreens: [
-      { screenName: 'store_list', views: 6240 },
-      { screenName: 'store_detail', views: 4380 },
-      { screenName: 'home', views: 3120 },
-      { screenName: 'store_search', views: 1520 },
-      { screenName: 'my_page', views: 980 },
-      { screenName: 'review_write', views: 410 },
-      { screenName: 'bookmark', views: 320 },
+      { screenName: 'exploration', views: 5240, users: 2310 },
+      { screenName: 'store_detail', views: 4380, users: 1540 },
     ],
     retention: { totalUsers: 940, d1: 44.2, d7: 19.6, d30: 8.3, error: null },
     searchTerms: [
@@ -59,50 +92,65 @@ export function buildMockOverview(range) {
     byStore: {
       rows: [
         { name: '가챠팝 홍대점', count: 482 },
-        { name: '다이소 성수', count: 351 },
-        { name: '산리오 팝업', count: 298 },
-        { name: '치이카와 카페', count: 244 },
-        { name: '포켓몬 스토어', count: 187 },
-      ],
-      error: null,
-    },
-    byLocation: {
-      rows: [
-        { name: '홍대', count: 628 },
-        { name: '성수', count: 541 },
-        { name: '용산', count: 402 },
-        { name: '강남', count: 377 },
-        { name: '건대', count: 213 },
-      ],
-      error: null,
-    },
-    byEventType: {
-      rows: [
-        { name: '팝업', count: 912 },
-        { name: '콜라보카페', count: 548 },
-        { name: '전시', count: 321 },
+        { name: '찌꼬뽀꼬 연남2호점', count: 351 },
+        { name: '산리오 팝업 성수', count: 298 },
+        { name: '치이카와 랜드 용산', count: 244 },
+        { name: '포켓몬 가챠 강남', count: 187 },
       ],
       error: null,
     },
     byStatus: {
       rows: [
-        { name: '진행 중', count: 1102 },
-        { name: '오픈 예정', count: 428 },
-        { name: '종료', count: 276 },
+        { name: 'OPEN', count: 2620 },
+        { name: 'PRE_OPEN', count: 840 },
+        { name: 'BEFORE_HOURS', count: 510 },
+        { name: 'CLOSED', count: 330 },
+        { name: 'PERMANENTLY_CLOSED', count: 80 },
       ],
       error: null,
+    },
+    byElement: {
+      rows: [
+        { name: 'search_result_item', count: 1460 },
+        { name: 'share_button', count: 420 },
+      ],
+      error: null,
+    },
+    landing: {
+      views: 3820,
+      viewUsers: 3010,
+      downloads: 690,
+      downloadUsers: 602,
+      bySource: [
+        { source: 'instagram / social', views: 1840, downloads: 412 },
+        { source: 'moree_landing / website', views: 1120, downloads: 154 },
+        { source: 'google / organic', views: 560, downloads: 88 },
+        { source: 'x / social', views: 300, downloads: 36 },
+      ],
+      byStore: { rows: [{ name: 'ios', count: 402 }, { name: 'android', count: 288 }], error: null },
     },
     // 인사이트(의사결정용) — 앱 계측 후 실데이터로 대체될 자리
     insights: {
       funnel: [
-        { stage: '설치 (first_open)', value: 940 },
-        { stage: '가입 (sign_up)', value: 512 },
-        { stage: '첫 로그인 (login)', value: 430 },
+        { stage: '설치 (first_open)', event: 'first_open', value: 940 },
+        { stage: '탐색 화면 진입', event: 'screen_view:exploration', value: 860 },
+        { stage: '매장 상세 조회', event: 'screen_view:store_detail', value: 610 },
+        { stage: '공유 버튼 탭', event: 'tap:share_button', value: 140 },
       ],
+      pushOpen: {
+        total: 530,
+        byType: [
+          { name: 'BOOKMARK_STORE_OPEN', count: 214 },
+          { name: 'FOLLOW', count: 142 },
+          { name: 'REVIEW_LIKE', count: 98 },
+          { name: 'NOTICE', count: 76 },
+        ],
+      },
       searchFail: {
         total: 640,
         failed: 156,
         failRate: 24.4,
+        resultClickRate: 30.2,
         terms: [
           { name: '무직타이거', count: 42 },
           { name: '망그러진곰', count: 31 },
@@ -112,24 +160,24 @@ export function buildMockOverview(range) {
         ],
       },
       contentConversion: [
-        { name: '가챠팝 홍대점', views: 482, bookmarks: 96, shares: 41 },
-        { name: '치이카와 카페', views: 244, bookmarks: 61, shares: 28 },
-        { name: '산리오 팝업', views: 298, bookmarks: 72, shares: 33 },
-        { name: '다이소 성수', views: 351, bookmarks: 38, shares: 12 },
-        { name: '포켓몬 스토어', views: 187, bookmarks: 21, shares: 7 },
+        { name: '가챠팝 홍대점', views: 482, shares: 41 },
+        { name: '찌꼬뽀꼬 연남2호점', views: 351, shares: 12 },
+        { name: '산리오 팝업 성수', views: 298, shares: 33 },
+        { name: '치이카와 랜드 용산', views: 244, shares: 28 },
+        { name: '포켓몬 가챠 강남', views: 187, shares: 7 },
       ],
       segmentRetention: [
         { name: 'iOS', d1: 46.8, d7: 21.2, d30: 9.4 },
         { name: 'Android', d1: 41.0, d7: 17.4, d30: 7.1 },
-        { name: '팝업', d1: 49.2, d7: 24.0, d30: 11.0 },
-        { name: '콜라보카페', d1: 43.5, d7: 18.9, d30: 8.2 },
-        { name: '전시', d1: 38.1, d7: 14.2, d30: 5.5 },
+        { name: 'web', d1: 22.3, d7: 8.1, d30: 3.0 },
       ],
       wow: [
         { metric: '활성 사용자', current: 3120, prev: 2640, deltaPct: 18.2 },
         { metric: '신규 사용자', current: 940, prev: 1020, deltaPct: -7.8 },
         { metric: '세션', current: 8760, prev: 7980, deltaPct: 9.8 },
-        { metric: '가입(sign_up)', current: 512, prev: 430, deltaPct: 19.1 },
+        { metric: '매장 상세 조회', current: 4380, prev: 3910, deltaPct: 12.0 },
+        { metric: '검색 (search)', current: 640, prev: 702, deltaPct: -8.8 },
+        { metric: '설치 (first_open)', current: 940, prev: 1020, deltaPct: -7.8 },
       ],
     },
   };

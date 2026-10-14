@@ -25,6 +25,12 @@ import {
   UserAddOutlined,
   CommentOutlined,
   ReloadOutlined,
+  IdcardOutlined,
+  SearchOutlined,
+  StarOutlined,
+  ShareAltOutlined,
+  BellOutlined,
+  EyeOutlined,
 } from '@ant-design/icons';
 import {
   ResponsiveContainer,
@@ -45,6 +51,7 @@ import {
 import dayjs from 'dayjs';
 import styled from 'styled-components';
 import { fetchGaOverview } from '../api/ga';
+import { fetchUserStats } from '../api/userStats';
 import { buildMockOverview } from './analyticsMock'; // [MOCK] 롤백 시 이 줄 + 토글 제거
 
 const { RangePicker } = DatePicker;
@@ -63,6 +70,20 @@ const C = {
   axis: '#8c8c8c',
 };
 const CAT = ['#2a78d6', '#008300', '#e87ba4', '#eda100', '#1baf7a', '#eb6834'];
+
+const STATUS_LABEL = {
+  PRE_OPEN: '오픈 예정',
+  BEFORE_HOURS: '영업 전',
+  OPEN: '영업 중',
+  CLOSED: '영업 종료',
+  PERMANENTLY_CLOSED: '폐업',
+};
+const ELEMENT_LABEL = {
+  share_button: '공유 버튼 (매장 상세)',
+  search_result_item: '검색 결과 항목 (탐색)',
+};
+const withLabels = (result, labels) =>
+  result && { ...result, rows: (result.rows || []).map((r) => ({ ...r, name: labels[r.name] || r.name })) };
 
 const PageTitle = styled.h2`
   margin-bottom: 4px;
@@ -290,7 +311,7 @@ function Funnel({ data }) {
           </div>
         );
       })}
-      <Text type="secondary" style={{ fontSize: 12 }}>* 이벤트 발생 수 기준(참고용). 정확한 단계별 인원은 사용자 단위 계측 후 승격.</Text>
+      <Text type="secondary" style={{ fontSize: 12 }}>* 각 단계를 1회 이상 거친 사용자(기기) 수. 설치는 기간 내 새로 설치한 기기만 잡히므로 기존 사용자가 많으면 다음 단계가 더 클 수 있습니다.</Text>
     </div>
   );
 }
@@ -316,16 +337,22 @@ export default function Analytics() {
   const [error, setError] = useState(null);
   const [tab, setTab] = useState('overview');
   const [mock, setMock] = useState(false); // [MOCK] 데모 데이터 토글
+  const [userStats, setUserStats] = useState({ data: null, error: null });
 
   const load = useCallback(async (r) => {
     setLoading(true);
     setError(null);
     try {
       const [start, end] = r || [];
-      const overview = await fetchGaOverview({
+      const params = {
         startDate: start ? start.format(DATE_FMT) : undefined,
         endDate: end ? end.format(DATE_FMT) : undefined,
-      });
+      };
+      // DB 가입자 통계는 GA 와 독립. GA 가 실패해도 가입자 카드는 보여 준다.
+      fetchUserStats(params)
+        .then((s) => setUserStats({ data: s, error: null }))
+        .catch((e) => setUserStats({ data: null, error: e.response?.data?.message || e.message }));
+      const overview = await fetchGaOverview(params);
       setData(overview);
     } catch (err) {
       const body = err.response?.data;
@@ -345,7 +372,9 @@ export default function Analytics() {
       if (useMock) {
         setError(null);
         setLoading(false);
-        setData(buildMockOverview(r));
+        const mockData = buildMockOverview(r);
+        setData(mockData);
+        setUserStats({ data: mockData.mockUserStats, error: null });
       } else {
         load(r);
       }
@@ -365,6 +394,9 @@ export default function Analytics() {
   const topScreens = error ? [] : data?.topScreens || [];
   const platforms = error ? [] : data?.platforms || [];
   const searchTerms = error ? [] : data?.searchTerms || [];
+  const channels = error ? [] : data?.channels || [];
+  const rolling = error ? null : data?.activeUsersRolling;
+  const db = userStats.data;
 
   const isNotConfigured = error?.code === 'GA_NOT_CONFIGURED';
   const stat = (v) => (error ? '-' : v ?? 0);
@@ -372,8 +404,38 @@ export default function Analytics() {
   const pctSuffix = (v) => (error || v == null ? '' : '%');
 
   // ── 개요 탭 ──
+  const signUpDelta = db ? db.newUsers - db.previousNewUsers : 0;
   const OverviewTab = (
     <Space direction="vertical" size={16} style={{ display: 'flex' }}>
+      <SoftCard title="가입자 (DB 기준 · 계정 단위)" size="small" extra={<Tag color="green">디스코드 주간 리포트와 같은 기준</Tag>}>
+        {userStats.error ? (
+          <Alert type="error" showIcon message="가입자 통계 조회 실패" description={userStats.error} />
+        ) : (
+          <Row gutter={[16, 16]}>
+            <Col xs={12} md={6}><Statistic title="전체 가입자 (탈퇴·탈퇴 대기 제외)" value={db?.activeUsers ?? '-'} groupSeparator="," valueStyle={{ fontWeight: 700 }} /></Col>
+            <Col xs={12} md={6}>
+              <Statistic title="기간 내 신규 가입" value={db?.newUsers ?? '-'} groupSeparator="," valueStyle={{ fontWeight: 700 }} />
+              {db && (
+                <div style={{ fontSize: 13, color: signUpDelta >= 0 ? '#0ca30c' : '#d03b3b' }}>
+                  {signUpDelta >= 0 ? '▲' : '▼'} {Math.abs(signUpDelta)} <span style={{ color: '#8c8c8c' }}>vs 직전 기간 {fmt(db.previousNewUsers)}</span>
+                </div>
+              )}
+            </Col>
+            <Col xs={12} md={6}><Statistic title="기간 내 탈퇴 요청" value={db?.withdrawnUsers ?? '-'} groupSeparator="," valueStyle={{ fontWeight: 700 }} /></Col>
+            <Col xs={12} md={6}>
+              <Statistic title="가입 경로" value={db ? db.signUpMethods.map((m) => `${m.provider} ${m.count}`).join(' · ') || '-' : '-'} valueStyle={{ fontSize: 16, fontWeight: 600 }} />
+            </Col>
+          </Row>
+        )}
+      </SoftCard>
+
+      <Alert
+        type="info"
+        showIcon
+        message="아래 GA 지표는 '사람'이 아니라 '기기(브라우저·앱 설치본)' 단위입니다"
+        description="로그인·가입 여부와 무관하게 접속한 기기를 셉니다. 한 사람이 웹과 앱으로 들어오면 2로 잡히고, 둘러보기만 한 방문자도 포함되므로 위 가입자 수보다 큰 게 정상입니다."
+      />
+
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={8}><StatCard title="활성 사용자" value={stat(totals.activeUsers)} icon={<UserOutlined />} color={CAT[0]} /></Col>
         <Col xs={24} sm={8}><StatCard title="신규 사용자" value={stat(totals.newUsers)} icon={<UsergroupAddOutlined />} color={CAT[1]} /></Col>
@@ -417,6 +479,69 @@ export default function Analytics() {
         </Col>
       </Row>
 
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={12}>
+          <SoftCard title="DAU · WAU · MAU" size="small" extra={rolling?.asOf && <Text type="secondary">{rolling.asOf} 기준</Text>}>
+            {!rolling || rolling.daily?.length === 0 ? (
+              <EmptyCard />
+            ) : (
+              <>
+                <Row gutter={[16, 16]}>
+                  <Col span={6}><Statistic title="DAU" value={rolling.dau} groupSeparator="," valueStyle={{ fontWeight: 700 }} /></Col>
+                  <Col span={6}><Statistic title="WAU" value={rolling.wau} groupSeparator="," valueStyle={{ fontWeight: 700 }} /></Col>
+                  <Col span={6}><Statistic title="MAU" value={rolling.mau} groupSeparator="," valueStyle={{ fontWeight: 700 }} /></Col>
+                  <Col span={6}><Statistic title="고착도 (DAU/MAU)" value={rolling.stickiness ?? '-'} suffix={rolling.stickiness != null ? '%' : ''} valueStyle={{ fontWeight: 700, color: CAT[0] }} /></Col>
+                </Row>
+                <ResponsiveContainer width="100%" height={180}>
+                  <AreaChart data={rolling.daily} margin={{ top: 12, right: 16, bottom: 4, left: -8 }}>
+                    <CartesianGrid stroke={C.grid} vertical={false} />
+                    <XAxis dataKey="date" tickFormatter={shortDay} tick={{ fill: C.axis, fontSize: 12 }} tickLine={false} axisLine={{ stroke: C.grid }} minTickGap={24} />
+                    <YAxis tick={{ fill: C.axis, fontSize: 12 }} tickLine={false} axisLine={false} width={48} allowDecimals={false} />
+                    <Tooltip contentStyle={tooltipStyle} formatter={(v) => fmt(v)} />
+                    <Legend iconType="plainline" wrapperStyle={{ fontSize: 13 }} />
+                    <Area type="monotone" dataKey="mau" name="MAU" stroke={CAT[2]} strokeWidth={2} fillOpacity={0} />
+                    <Area type="monotone" dataKey="wau" name="WAU" stroke={CAT[1]} strokeWidth={2} fillOpacity={0} />
+                    <Area type="monotone" dataKey="dau" name="DAU" stroke={CAT[0]} strokeWidth={2} fillOpacity={0} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </>
+            )}
+          </SoftCard>
+        </Col>
+        <Col xs={24} lg={12}>
+          <SoftCard title="유입 채널 (세션 기준)" size="small">
+            {channels.length === 0 ? (
+              <EmptyCard />
+            ) : (
+              <HBar data={channels} nameKey="channel" valueKey="sessions" valueName="세션" gid="gCh" />
+            )}
+          </SoftCard>
+        </Col>
+      </Row>
+
+      {db?.dailySignUps?.length > 0 && (
+        <SoftCard title="일별 신규 가입 (DB) vs 신규 사용자 (GA)" size="small">
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart
+              data={db.dailySignUps.map((d) => ({
+                date: d.date,
+                signUps: d.count,
+                gaNew: dailyUsers.find((u) => u.date === d.date)?.newUsers ?? null,
+              }))}
+              margin={{ top: 8, right: 16, bottom: 4, left: -8 }}
+            >
+              <CartesianGrid stroke={C.grid} vertical={false} />
+              <XAxis dataKey="date" tickFormatter={shortDay} tick={{ fill: C.axis, fontSize: 12 }} tickLine={false} axisLine={{ stroke: C.grid }} minTickGap={24} />
+              <YAxis tick={{ fill: C.axis, fontSize: 12 }} tickLine={false} axisLine={false} width={48} allowDecimals={false} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(v) => fmt(v)} />
+              <Legend wrapperStyle={{ fontSize: 13 }} />
+              <Bar dataKey="gaNew" name="신규 사용자 (GA·기기)" fill={C.barTo} radius={[4, 4, 0, 0]} maxBarSize={14} />
+              <Bar dataKey="signUps" name="신규 가입 (DB·계정)" fill={CAT[1]} radius={[4, 4, 0, 0]} maxBarSize={14} />
+            </BarChart>
+          </ResponsiveContainer>
+        </SoftCard>
+      )}
+
       <SoftCard title="재방문율 (선택 기간 코호트)" size="small">
         {retention?.error && !error && <Alert style={{ marginBottom: 12 }} type="warning" showIcon message="재방문율을 계산할 데이터가 부족합니다" />}
         <Row gutter={[16, 16]}>
@@ -432,21 +557,46 @@ export default function Analytics() {
   );
 
   // ── 이벤트 탭 ──
-  const keyCards = [
-    { title: 'first_open (설치)', value: keyEvents.first_open, icon: <AppstoreOutlined />, color: CAT[0] },
-    { title: 'sign_up (가입)', value: keyEvents.sign_up, icon: <UserAddOutlined />, color: CAT[1] },
-    { title: 'login (로그인)', value: keyEvents.login, icon: <LoginOutlined />, color: '#4a3aa7' },
-    { title: 'review_submit (후기)', value: keyEvents.review_submit, icon: <CommentOutlined />, color: '#eb6834' },
+  const app = error ? {} : data?.appEventCounts || {};
+  const appCards = [
+    { title: '설치 (first_open)', value: app.firstOpen, icon: <AppstoreOutlined />, color: CAT[0] },
+    { title: '탐색 화면 진입', value: app.explorationViews, icon: <EyeOutlined />, color: CAT[4] },
+    { title: '매장 상세 조회', value: app.storeDetailViews, icon: <EyeOutlined />, color: CAT[0] },
+    { title: '검색 (search)', value: app.search, icon: <SearchOutlined />, color: CAT[3] },
+    { title: '검색 결과 탭', value: app.searchResultTaps, icon: <SearchOutlined />, color: CAT[2], dim: true },
+    { title: '공유 버튼 탭', value: app.shareTaps, icon: <ShareAltOutlined />, color: CAT[1], dim: true },
+  ];
+  const pendingCards = [
+    { title: 'sign_up (가입)', value: keyEvents.sign_up, icon: <UserAddOutlined /> },
+    { title: 'login (로그인)', value: keyEvents.login, icon: <LoginOutlined /> },
+    { title: 'guest_login (둘러보기)', value: keyEvents.guest_login, icon: <IdcardOutlined /> },
+    { title: 'add_bookmark (찜)', value: keyEvents.add_bookmark, icon: <StarOutlined /> },
+    { title: 'review_submit (후기)', value: keyEvents.review_submit, icon: <CommentOutlined /> },
+    { title: 'push_open (푸시 열람)', value: keyEvents.push_open, icon: <BellOutlined /> },
   ];
   const EventsTab = (
     <Space direction="vertical" size={16} style={{ display: 'flex' }}>
-      <Row gutter={[16, 16]}>
-        {keyCards.map((c) => (
-          <Col xs={24} sm={12} lg={6} key={c.title}>
-            <StatCard title={c.title} value={stat(c.value)} icon={c.icon} color={c.color} />
-          </Col>
-        ))}
-      </Row>
+      <SoftCard title="앱에서 수집 중인 이벤트" size="small" extra={<Tag color="green">iOS · Android 공통</Tag>}>
+        <Row gutter={[16, 16]}>
+          {appCards.map((c) => (
+            <Col xs={24} sm={12} lg={8} key={c.title}>
+              <StatCard title={c.title} value={c.value == null && !error ? '등록 대기' : stat(c.value)} icon={c.icon} color={c.color} />
+            </Col>
+          ))}
+        </Row>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          탭 수치는 GA4 맞춤 측정기준 element_name 등록 후 표시됩니다.
+        </Text>
+      </SoftCard>
+      <SoftCard title="앱 계측 대기 이벤트" size="small" extra={<Tag color="orange">앱 작업 필요</Tag>}>
+        <Row gutter={[16, 16]}>
+          {pendingCards.map((c) => (
+            <Col xs={24} sm={12} lg={8} key={c.title}>
+              <StatCard title={c.title} value={stat(c.value)} icon={c.icon} color="#8c8c8c" />
+            </Col>
+          ))}
+        </Row>
+      </SoftCard>
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={12}>
           <SoftCard title="Top 이벤트" size="small">
@@ -454,7 +604,7 @@ export default function Analytics() {
           </SoftCard>
         </Col>
         <Col xs={24} lg={12}>
-          <SoftCard title="화면별 조회 TOP" size="small">
+          <SoftCard title="화면별 조회 TOP (screen_view)" size="small">
             {topScreens.length === 0 ? <EmptyCard /> : <HBar data={topScreens} nameKey="screenName" valueKey="views" valueName="조회 수" gid="gScr" />}
           </SoftCard>
         </Col>
@@ -462,39 +612,54 @@ export default function Analytics() {
     </Space>
   );
 
-  // ── 행사·검색 탭 (B그룹) ──
+  // ── 매장·검색 탭 (B그룹) ──
   const ContentTab = (
     <Space direction="vertical" size={16} style={{ display: 'flex' }}>
       <Alert
         type="info"
         showIcon
-        message="이 탭 지표는 GA4 맞춤 측정기준 등록 + 앱 이벤트 계측이 선행되어야 채워집니다"
-        description="현재는 패널만 준비된 상태이며, 등록·계측이 완료되면 자동으로 데이터가 표시됩니다. (목업 토글로 예시 모양 확인 가능)"
+        message="이 탭 지표는 GA4 맞춤 측정기준 등록 후 채워집니다"
+        description="필요한 측정기준(이벤트 범위): store_name, status, element_name, search_term, has_result. 앱은 이미 이 값을 보내고 있어 등록만 하면 그 이후 데이터부터 표시됩니다."
       />
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={12}>
           <SoftCard title="검색어 TOP" size="small">
             {data?.searchTermsError && !error && (
-              <Alert style={{ marginBottom: 12 }} type="warning" showIcon message="아직 데이터 없음" description="GA4 맞춤 측정기준(search_term) 등록 + 앱 계측 후 표시됩니다." />
+              <Alert style={{ marginBottom: 12 }} type="warning" showIcon message="아직 데이터 없음" description="GA4 맞춤 측정기준(search_term) 등록 후 표시됩니다." />
             )}
             {searchTerms.length === 0 ? (
-              <EmptyCard>{data?.searchTermsError ? '등록/계측 대기' : '데이터 없음'}</EmptyCard>
+              <EmptyCard>{data?.searchTermsError ? '등록 대기' : '데이터 없음'}</EmptyCard>
             ) : (
               <HBar data={searchTerms} nameKey="searchTerm" valueKey="eventCount" valueName="검색 수" gid="gSch" />
             )}
           </SoftCard>
         </Col>
         <Col xs={24} lg={12}>
-          <DimPanel title="행사 조회 TOP" result={error ? null : data?.byStore} valueName="조회 수" paramHint="item_name · view_item" gid="gStore" />
+          <DimPanel
+            title="매장 상세 조회 TOP"
+            result={error ? null : data?.byStore && { ...data.byStore, rows: data.byStore.rows.slice(0, 10) }}
+            valueName="조회 수"
+            paramHint="store_name · screen_view(store_detail)"
+            gid="gStore"
+          />
         </Col>
         <Col xs={24} lg={12}>
-          <DimPanel title="지역별 조회" result={error ? null : data?.byLocation} valueName="조회 수" paramHint="location · view_item" gid="gLoc" />
+          <DimPanel
+            title="조회 시점 매장 상태"
+            result={error ? null : withLabels(data?.byStatus, STATUS_LABEL)}
+            valueName="조회 수"
+            paramHint="status · screen_view(store_detail)"
+            chart="donut"
+          />
         </Col>
         <Col xs={24} lg={12}>
-          <DimPanel title="유형별 조회" result={error ? null : data?.byEventType} valueName="조회 수" paramHint="event_type · view_item" chart="donut" />
-        </Col>
-        <Col xs={24} lg={12}>
-          <DimPanel title="상태별 조회" result={error ? null : data?.byStatus} valueName="조회 수" paramHint="status · view_item" chart="donut" />
+          <DimPanel
+            title="탭 요소별"
+            result={error ? null : withLabels(data?.byElement, ELEMENT_LABEL)}
+            valueName="탭 수"
+            paramHint="element_name · tap"
+            gid="gEl"
+          />
         </Col>
       </Row>
     </Space>
@@ -503,10 +668,10 @@ export default function Analytics() {
   // ── 인사이트 탭 ──
   const insights = error ? null : data?.insights;
   const funnelData =
-    insights?.funnel || [
-      { stage: '설치 (first_open)', value: keyEvents.first_open || 0 },
-      { stage: '가입 (sign_up)', value: keyEvents.sign_up || 0 },
-      { stage: '첫 로그인 (login)', value: keyEvents.login || 0 },
+    insights?.funnel?.some((f) => f.value > 0) ? insights.funnel : [
+      { stage: '설치 (first_open)', value: app.firstOpen || 0 },
+      { stage: '탐색 화면 진입', value: app.explorationViews || 0 },
+      { stage: '매장 상세 조회', value: app.storeDetailViews || 0 },
     ];
   const InsightsTab = (
     <Space direction="vertical" size={16} style={{ display: 'flex' }}>
@@ -515,7 +680,7 @@ export default function Analytics() {
           type="info"
           showIcon
           message="인사이트 지표는 앱 이벤트 계측 후 채워집니다"
-          description="지금은 '가입 퍼널'만 기존 이벤트로 표시되고, 나머지는 목업 토글로 목표 화면을 확인하세요. 필요한 계측 우선순위는 docs/GA-계측-우선순위.md 참고."
+          description="GA4 맞춤 측정기준 등록과 앱 이벤트 계측이 끝난 항목부터 자동으로 채워집니다. 명세는 docs/GA-계측-우선순위.md 참고."
         />
       )}
 
@@ -535,7 +700,7 @@ export default function Analytics() {
 
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={12}>
-          <SoftCard title="가입 전환 퍼널" size="small">
+          <SoftCard title="탐색 퍼널 (설치 → 탐색 → 매장 상세 → 공유)" size="small" extra={<Tag color="orange">가입 퍼널은 sign_up 계측 후</Tag>}>
             <Funnel data={funnelData} />
           </SoftCard>
         </Col>
@@ -548,9 +713,18 @@ export default function Analytics() {
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     실패 {fmt(insights.searchFail.failed)} / 전체 {fmt(insights.searchFail.total)}
                   </Text>
+                  {insights.searchFail.resultClickRate != null && (
+                    <Statistic
+                      style={{ marginTop: 12 }}
+                      title="결과 있는 검색 → 결과 탭"
+                      value={insights.searchFail.resultClickRate}
+                      suffix="%"
+                      valueStyle={{ color: CAT[0], fontWeight: 700 }}
+                    />
+                  )}
                 </Col>
                 <Col xs={24} sm={16}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>결과 없는 검색어 (= 없는 행사)</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>결과 없는 검색어 (= 없는 매장)</Text>
                   <HBar data={insights.searchFail.terms} nameKey="name" valueKey="count" valueName="실패 검색" gid="gFail" />
                 </Col>
               </Row>
@@ -561,37 +735,85 @@ export default function Analytics() {
         </Col>
       </Row>
 
-      <SoftCard title="행사 조회 → 행동 전환 (조회 대비 북마크율)" size="small">
+      <SoftCard title="매장 조회 → 공유 전환" size="small">
         {insights?.contentConversion ? (
           <Table
             size="small"
             rowKey="name"
-            pagination={false}
+            pagination={{ pageSize: 10, hideOnSinglePage: true }}
             dataSource={insights.contentConversion.map((r) => ({
               ...r,
-              cvr: r.views ? Number(((r.bookmarks / r.views) * 100).toFixed(1)) : 0,
+              shareRate: r.views ? Number(((r.shares / r.views) * 100).toFixed(1)) : 0,
             }))}
             columns={[
-              { title: '행사', dataIndex: 'name' },
-              { title: '조회', dataIndex: 'views', align: 'right', render: fmt },
-              { title: '북마크', dataIndex: 'bookmarks', align: 'right', render: fmt },
-              { title: '공유', dataIndex: 'shares', align: 'right', render: fmt },
+              { title: '매장', dataIndex: 'name' },
+              { title: '상세 조회', dataIndex: 'views', align: 'right', render: fmt, defaultSortOrder: 'descend', sorter: (a, b) => a.views - b.views },
+              { title: '공유 탭', dataIndex: 'shares', align: 'right', render: fmt, sorter: (a, b) => a.shares - b.shares },
               {
-                title: '북마크 전환율',
-                dataIndex: 'cvr',
+                title: '공유율',
+                dataIndex: 'shareRate',
                 align: 'right',
-                defaultSortOrder: 'descend',
-                sorter: (a, b) => a.cvr - b.cvr,
-                render: (v) => <b style={{ color: v >= 20 ? '#0ca30c' : v < 10 ? '#eb6834' : '#595959' }}>{v}%</b>,
+                sorter: (a, b) => a.shareRate - b.shareRate,
+                render: (v) => <b style={{ color: v >= 10 ? '#0ca30c' : '#595959' }}>{v}%</b>,
               },
             ]}
           />
         ) : (
-          <PendingPanel hint="view_item + add_bookmark + store_share (item_id)" />
+          <PendingPanel hint="store_name · element_name 맞춤 측정기준 등록" />
+        )}
+        <Text type="secondary" style={{ fontSize: 12 }}>찜·발도장 전환은 앱 이벤트가 없어 DB 기준(랭킹 페이지)으로 볼 예정</Text>
+      </SoftCard>
+
+      <SoftCard title="랜딩 → 다운로드 클릭" size="small">
+        {insights && data?.landing ? (
+          <Row gutter={[16, 16]}>
+            <Col xs={24} md={8}>
+              <Statistic title="랜딩 방문 (landing_view)" value={data.landing.views} groupSeparator="," valueStyle={{ fontWeight: 700 }} />
+              <Statistic style={{ marginTop: 12 }} title="다운로드 클릭 (click_download)" value={data.landing.downloads} groupSeparator="," valueStyle={{ fontWeight: 700 }} />
+              <Statistic
+                style={{ marginTop: 12 }}
+                title="클릭률 (사용자 기준)"
+                value={data.landing.viewUsers ? Number(((data.landing.downloadUsers / data.landing.viewUsers) * 100).toFixed(1)) : 0}
+                suffix="%"
+                valueStyle={{ fontWeight: 700, color: CAT[0] }}
+              />
+            </Col>
+            <Col xs={24} md={16}>
+              <Table
+                size="small"
+                rowKey="source"
+                pagination={false}
+                dataSource={data.landing.bySource.map((r) => ({ ...r, rate: r.views ? Number(((r.downloads / r.views) * 100).toFixed(1)) : 0 }))}
+                columns={[
+                  { title: '유입 (source / medium)', dataIndex: 'source' },
+                  { title: '방문', dataIndex: 'views', align: 'right', render: fmt },
+                  { title: '다운로드 클릭', dataIndex: 'downloads', align: 'right', render: fmt },
+                  { title: '클릭률', dataIndex: 'rate', align: 'right', render: (v) => `${v}%` },
+                ]}
+              />
+            </Col>
+          </Row>
+        ) : (
+          <PendingPanel hint="랜딩(moree-landing) Firebase 가 같은 GA4 속성인지 확인" />
         )}
       </SoftCard>
 
-      <SoftCard title="세그먼트별 재방문율 (플랫폼 / 유형)" size="small">
+      <SoftCard title="푸시 효과 (알림 유형별 열람)" size="small">
+        {insights?.pushOpen?.byType?.length > 0 ? (
+          <Row gutter={16} align="middle">
+            <Col xs={24} sm={8}>
+              <Statistic title="푸시 열람" value={insights.pushOpen.total} groupSeparator="," valueStyle={{ fontWeight: 700 }} />
+            </Col>
+            <Col xs={24} sm={16}>
+              <HBar data={insights.pushOpen.byType} nameKey="name" valueKey="count" valueName="열람" gid="gPush" />
+            </Col>
+          </Row>
+        ) : (
+          <PendingPanel hint="push_open + notification_type" />
+        )}
+      </SoftCard>
+
+      <SoftCard title="플랫폼별 재방문율" size="small">
         {insights?.segmentRetention ? (
           <Table
             size="small"
@@ -606,7 +828,7 @@ export default function Analytics() {
             ]}
           />
         ) : (
-          <PendingPanel hint="platform / event_type / location 세그먼트 + 재방문 코호트" />
+          <PendingPanel hint="자동 수집 (데이터가 쌓이면 표시)" />
         )}
       </SoftCard>
     </Space>
@@ -660,7 +882,7 @@ export default function Analytics() {
           items={[
             { key: 'overview', label: '개요', children: OverviewTab },
             { key: 'events', label: '이벤트', children: EventsTab },
-            { key: 'content', label: '행사·검색', children: ContentTab },
+            { key: 'content', label: '매장·검색', children: ContentTab },
             { key: 'insights', label: '인사이트', children: InsightsTab },
           ]}
         />
