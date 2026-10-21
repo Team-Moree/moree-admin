@@ -18,6 +18,7 @@ import {
   BellOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  MobileOutlined,
 } from '@ant-design/icons';
 import styled from 'styled-components';
 import EnvBadge from './EnvBadge';
@@ -64,6 +65,7 @@ const menuItems = [
   { key: '/users', icon: <UserOutlined />, label: '유저' },
   { key: '/morees', icon: <SmileOutlined />, label: '모리' },
   { key: '/bookmark-icons', icon: <BookOutlined />, label: '북마크 아이콘' },
+  { key: '/app-notices', icon: <MobileOutlined />, label: '앱 업데이트 팝업' },
   { key: '/notifications', icon: <BellOutlined />, label: '푸시 알림 (QA)' },
   { key: '/metrics', icon: <LineChartOutlined />, label: '서버 메트릭' },
 ];
