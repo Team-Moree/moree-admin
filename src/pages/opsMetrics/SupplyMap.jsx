@@ -54,10 +54,10 @@ export default function SupplyMap({ points, country, height = 480 }) {
       const pin = new PinElement({ background: color, borderColor: color, glyphColor: '#fff', scale: 0.8 });
       const marker = new AdvancedMarkerElement({
         position: { lat: p.latitude, lng: p.longitude },
-        content: pin.element,
+        content: pin,
         title: p.title,
       });
-      marker.addListener('click', () => {
+      marker.addEventListener('gmp-click', () => {
         infoWindow.setContent(`<div style="font-size:13px"><b>${escapeHtml(p.title)}</b><br/>${p.isPopup ? '팝업' : '상설 매장'}</div>`);
         infoWindow.open({ map, anchor: marker });
       });
