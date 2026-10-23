@@ -5,7 +5,7 @@ import { getGoogleMapId, getGoogleMapsApiKey, importGoogleMapsLibraries } from '
 import { COLORS } from './ui';
 
 const COUNTRY_VIEW = {
-  한국: { center: { lat: 36.3, lng: 127.8 }, zoom: 7 },
+  한국: { center: { lat: 37.5563, lng: 126.9236 }, zoom: 15 },
   일본: { center: { lat: 36.2, lng: 138.3 }, zoom: 5 },
   해외: { center: { lat: 30, lng: 0 }, zoom: 2 },
 };
@@ -68,13 +68,13 @@ export default function SupplyMap({ points, country, height = 480 }) {
     clustererRef.current.addMarkers(markers);
 
     const view = COUNTRY_VIEW[country] || COUNTRY_VIEW.한국;
-    if (points.length > 1 && country !== '해외') {
+    if (points.length > 1 && country === '일본') {
       const bounds = new window.google.maps.LatLngBounds();
       points.forEach((p) => bounds.extend({ lat: p.latitude, lng: p.longitude }));
       map.fitBounds(bounds, 40);
     } else {
       map.setCenter(points.length === 1 ? { lat: points[0].latitude, lng: points[0].longitude } : view.center);
-      map.setZoom(points.length === 1 ? 12 : view.zoom);
+      map.setZoom(points.length === 1 ? 16 : view.zoom);
     }
     return () => infoWindow.close();
   }, [ready, points, country]);

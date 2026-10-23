@@ -3,7 +3,8 @@ import { Row, Col, Segmented, Table, Spin, Button, Tag, Typography } from 'antd'
 import { DownloadOutlined } from '@ant-design/icons';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { fetchAppOpenHours, fetchPushTargets } from '../../api/dashboard';
-import { SoftCard, Toolbar, HintText, COLORS, ErrorAlert, ReloadButton, formatDate, formatNumber, useRemote } from './ui';
+import { SoftCard, Toolbar, HintText, COLORS, ErrorAlert, ReloadButton, ClickText, formatDate, formatNumber, useRemote } from './ui';
+import { MemberDrawer } from './InsightDrawers';
 
 const { Text } = Typography;
 
@@ -69,9 +70,14 @@ function AppOpenHours() {
   );
 }
 
-const targetColumns = [
+const targetColumns = (openMember) => [
   { title: 'userId', dataIndex: 'userId', width: 90 },
-  { title: '닉네임', dataIndex: 'nickname', width: 160 },
+  {
+    title: '닉네임',
+    dataIndex: 'nickname',
+    width: 160,
+    render: (n, r) => <ClickText onClick={() => openMember({ id: r.userId, nickname: n })}>{n}</ClickText>,
+  },
   { title: '매장 수', dataIndex: 'storeCount', align: 'right', width: 90, render: formatNumber },
   {
     title: '매장 (최근 북마크 5개)',
@@ -83,6 +89,7 @@ const targetColumns = [
 function PushTargets() {
   const [type, setType] = useState(TARGET_TYPES[0].value);
   const [page, setPage] = useState(0);
+  const [member, setMember] = useState(null);
   const fetcher = useCallback(() => fetchPushTargets({ type, page, size: PAGE_SIZE }), [type, page]);
   const { data, loading, error, load } = useRemote(fetcher);
   const users = data?.users || [];
@@ -119,7 +126,7 @@ function PushTargets() {
       </Toolbar>
       <ErrorAlert title="푸시 대상 조회 실패" error={error} />
       <Table
-        columns={targetColumns}
+        columns={targetColumns(setMember)}
         dataSource={users}
         rowKey="userId"
         loading={loading}
@@ -133,6 +140,7 @@ function PushTargets() {
         }}
       />
       <HintText>회원만 · 매장 수 많은 순 · CSV 는 지금 보는 페이지 유저만 (userId, nickname, storeCount)</HintText>
+      <MemberDrawer member={member} onClose={() => setMember(null)} />
     </SoftCard>
   );
 }
