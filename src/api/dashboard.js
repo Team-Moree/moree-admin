@@ -10,7 +10,9 @@ export const fetchAppOpenHours = ({ days } = {}) => get('/app-open-hours', { day
 
 export const fetchPushTargets = ({ type, page, size } = {}) => get('/push-targets', { type, page, size });
 
-export const fetchOperationsMetrics = ({ limit } = {}) => get('/operations', { limit });
+export const fetchOperationsMetrics = () => get('/operations');
+
+export const fetchStoresByRequests = ({ page, size } = {}) => get('/operations/stores-by-requests', { page, size });
 
 export const fetchExploreMetrics = ({ limit, storeSort, categoryId } = {}) =>
   get('/explore', { limit, storeSort, categoryId });
