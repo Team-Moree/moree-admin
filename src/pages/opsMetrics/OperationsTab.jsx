@@ -42,7 +42,7 @@ const submissionColumns = [
   num('숨김', 'hidden'),
 ];
 
-const STORE_PAGE_SIZE = 20;
+const STORE_PAGE_SIZE = 10;
 
 function StoresByRequests({ reloadKey }) {
   const [page, setPage] = useState(0);
