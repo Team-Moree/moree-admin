@@ -56,6 +56,7 @@ export default function SupplyMap({ points, country, height = 480 }) {
         position: { lat: p.latitude, lng: p.longitude },
         content: pin,
         title: p.title,
+        gmpClickable: true,
       });
       marker.addEventListener('gmp-click', () => {
         infoWindow.setContent(`<div style="font-size:13px"><b>${escapeHtml(p.title)}</b><br/>${p.isPopup ? '팝업' : '상설 매장'}</div>`);
