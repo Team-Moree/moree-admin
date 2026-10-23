@@ -79,7 +79,7 @@ npm run build:real   # 운영(REAL)
 ## 서버 메트릭 (Grafana Cloud)
 
 `/metrics` 페이지는 moree-api(Alloy)가 Grafana Cloud(Prometheus)로 보낸 지표를 조회합니다.
-GA 분석 페이지(`/api/ga`)와 동일하게, 자격증명이 브라우저에 노출되면 안 되므로 서버리스 함수(`api/metrics/overview.js`)가 대신 Grafana Cloud 를 호출합니다.
+자격증명이 브라우저에 노출되면 안 되므로 서버리스 함수(`api/metrics/overview.js`)가 대신 Grafana Cloud 를 호출합니다.
 
 - 필요한 서버 env (`.env.metrics.example` 참고, `VITE_` 접두어 없음 — 서버 전용):
   - `GRAFANA_STACK_URL`, `GRAFANA_PROM_DATASOURCE_UID`, `GRAFANA_SA_TOKEN`

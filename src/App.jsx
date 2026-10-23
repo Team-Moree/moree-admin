@@ -3,7 +3,6 @@ import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
-import Analytics from './pages/Analytics';
 import Metrics from './pages/Metrics';
 import Growth from './pages/Growth';
 import OpsMetrics from './pages/OpsMetrics';
@@ -37,7 +36,6 @@ export default function App() {
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/growth" element={<Growth />} />
                   <Route path="/ops-metrics" element={<OpsMetrics />} />
-                  <Route path="/analytics" element={<Analytics />} />
                   <Route path="/metrics" element={<Metrics />} />
                   <Route path="/fandom-categories" element={<FandomCategories />} />
                   <Route path="/fandom-targets" element={<FandomTargets />} />
