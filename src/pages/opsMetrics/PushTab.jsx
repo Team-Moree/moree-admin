@@ -2,9 +2,10 @@ import { useCallback, useState } from 'react';
 import { Row, Col, Segmented, Table, Spin, Button, Tag, Typography, Statistic, Alert } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ComposedChart, Line, Legend } from 'recharts';
-import { fetchAppOpenHours, fetchPushMetrics, fetchPushTargets } from '../../api/dashboard';
 import dayjs from 'dayjs';
-import { SoftCard, Toolbar, HintText, COLORS, ErrorAlert, ReloadButton, formatDate, formatNumber, useRemote } from './ui';
+import { fetchAppOpenHours, fetchPushMetrics, fetchPushTargets } from '../../api/dashboard';
+import { SoftCard, Toolbar, HintText, COLORS, ErrorAlert, ReloadButton, ClickText, formatDate, formatNumber, useRemote } from './ui';
+import { MemberDrawer } from './InsightDrawers';
 
 const { Text } = Typography;
 
@@ -44,16 +45,9 @@ const PUSH_DAY_OPTIONS = [
 const rateText = (rate, opened) => `${rate ?? 0}% (${formatNumber(opened)})`;
 
 const pushColumns = [
-  {
-    title: '발송',
-    dataIndex: 'firstSentAt',
-    width: 120,
-    render: (v, r) =>
-      dayjs(v).format('M/D HH:mm') + (dayjs(r.lastSentAt).diff(dayjs(v), 'minute') >= 1 ? ` ~ ${dayjs(r.lastSentAt).format('HH:mm')}` : ''),
-  },
+  { title: '발송일', dataIndex: 'sentDate', width: 100, render: (v) => dayjs(v).format('M/D (dd)') },
   { title: '종류', dataIndex: 'typeLabel', width: 130, render: (v) => <Tag>{v}</Tag> },
   { title: '제목', dataIndex: 'title' },
-  { title: '대상', dataIndex: 'sent', align: 'right', width: 70, render: formatNumber },
   { title: '도달', dataIndex: 'delivered', align: 'right', width: 70, render: formatNumber },
   { title: '클릭률', key: 'rate', align: 'right', width: 110, render: (_, r) => rateText(r.openRate, r.opened) },
 ];
@@ -95,16 +89,13 @@ function SentPushes() {
         {data && (
           <>
             <Row gutter={[16, 16]}>
-              <Col xs={12} md={6}>
-                <Statistic title="보낸 푸시" value={data.totals.sent} suffix="건" />
-              </Col>
-              <Col xs={12} md={6}>
+              <Col xs={12} md={8}>
                 <Statistic title="도달" value={data.totals.delivered} suffix="건" />
               </Col>
-              <Col xs={12} md={6}>
+              <Col xs={12} md={8}>
                 <Statistic title="클릭" value={data.totals.opened} suffix="건" />
               </Col>
-              <Col xs={12} md={6}>
+              <Col xs={12} md={8}>
                 <Statistic title="클릭률" value={data.totals.openRate} precision={1} suffix="%" />
               </Col>
             </Row>
@@ -112,7 +103,7 @@ function SentPushes() {
               style={{ marginTop: 16 }}
               columns={pushColumns}
               dataSource={data.pushes}
-              rowKey={(r) => `${r.pushType}-${r.title}-${r.firstSentAt}`}
+              rowKey={(r) => `${r.pushType}-${r.title}-${r.sentDate}`}
               pagination={{ pageSize: 20, hideOnSinglePage: true }}
               size="small"
             />
@@ -135,7 +126,7 @@ function SentPushes() {
         )}
       </Spin>
       <HintText>
-        {formatDate(data?.from)} ~ {formatDate(data?.to)} · 같은 종류·제목·날짜로 묶음 · 클릭률 = 클릭 ÷ 도달 · 도달 = FCM 발송 성공
+        {formatDate(data?.from)} ~ {formatDate(data?.to)} · 같은 종류·제목·날짜로 묶음 · 클릭률 = 클릭 ÷ 도달 · 매시 5분 갱신 · 최근 30일 보관
       </HintText>
     </SoftCard>
   );
@@ -180,9 +171,14 @@ function AppOpenHours() {
   );
 }
 
-const targetColumns = [
+const targetColumns = (openMember) => [
   { title: 'userId', dataIndex: 'userId', width: 90 },
-  { title: '닉네임', dataIndex: 'nickname', width: 160 },
+  {
+    title: '닉네임',
+    dataIndex: 'nickname',
+    width: 160,
+    render: (n, r) => <ClickText onClick={() => openMember({ id: r.userId, nickname: n })}>{n}</ClickText>,
+  },
   { title: '매장 수', dataIndex: 'storeCount', align: 'right', width: 90, render: formatNumber },
   {
     title: '매장 (최근 북마크 5개)',
@@ -194,6 +190,7 @@ const targetColumns = [
 function PushTargets() {
   const [type, setType] = useState(TARGET_TYPES[0].value);
   const [page, setPage] = useState(0);
+  const [member, setMember] = useState(null);
   const fetcher = useCallback(() => fetchPushTargets({ type, page, size: PAGE_SIZE }), [type, page]);
   const { data, loading, error, load } = useRemote(fetcher);
   const users = data?.users || [];
@@ -230,7 +227,7 @@ function PushTargets() {
       </Toolbar>
       <ErrorAlert title="푸시 대상 조회 실패" error={error} />
       <Table
-        columns={targetColumns}
+        columns={targetColumns(setMember)}
         dataSource={users}
         rowKey="userId"
         loading={loading}
@@ -244,6 +241,7 @@ function PushTargets() {
         }}
       />
       <HintText>회원만 · 매장 수 많은 순 · CSV 는 지금 보는 페이지 유저만 (userId, nickname, storeCount)</HintText>
+      <MemberDrawer member={member} onClose={() => setMember(null)} />
     </SoftCard>
   );
 }

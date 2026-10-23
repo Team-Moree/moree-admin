@@ -12,7 +12,7 @@ import {
   searchStores,
 } from '../../api/dashboard';
 import { SoftCard, Toolbar, HintText, ClickText, ErrorAlert, ReloadButton, formatDate, formatNumber, useRemote } from './ui';
-import { FandomTargetDrawer, StoreDrawer } from './InsightDrawers';
+import { FandomTargetDrawer, FolderDrawer, StoreDrawer } from './InsightDrawers';
 
 const { Text } = Typography;
 
@@ -105,6 +105,7 @@ export default function ExploreTab() {
   const [categories, setCategories] = useState([]);
   const [fandomTarget, setFandomTarget] = useState(null);
   const [store, setStore] = useState(null);
+  const [folder, setFolder] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -169,7 +170,11 @@ export default function ExploreTab() {
   ];
 
   const folderColumns = [
-    { title: '폴더', dataIndex: 'title' },
+    {
+      title: '폴더',
+      dataIndex: 'title',
+      render: (title, r) => <ClickText onClick={() => setFolder({ id: r.folderId, title })}>{title}</ClickText>,
+    },
     { title: '만든 사람', dataIndex: 'ownerNickname' },
     num('복사', 'copyCount'),
     num('매장', 'storeCount'),
@@ -271,6 +276,7 @@ export default function ExploreTab() {
       </Row>
       <FandomTargetDrawer target={fandomTarget} onClose={() => setFandomTarget(null)} />
       <StoreDrawer store={store} onClose={() => setStore(null)} />
+      <FolderDrawer folder={folder} onClose={() => setFolder(null)} />
     </div>
   );
 }

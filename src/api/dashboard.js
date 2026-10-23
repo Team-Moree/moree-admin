@@ -39,6 +39,12 @@ export const searchStores = (search) =>
 
 export const fetchFandomTargetInsights = (id, { limit } = {}) => get(`/fandom-targets/${id}/insights`, { limit });
 
+export const fetchFolderDetail = (id) => get(`/bookmark-folders/${id}`);
+
+export const fetchMemberDetail = (id) => get(`/members/${id}`);
+
+export const fetchStoreDetail = (id) => client.get(`/admin/store/${id}`).then((res) => res.data);
+
 export const fetchStoreInsights = (id, { weeks } = {}) => get(`/stores/${id}/insights`, { weeks });
 
 export const fetchRegionMetrics = ({ days } = {}) => get('/regions', { days });

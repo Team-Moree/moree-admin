@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Row, Col, Statistic, Table, Alert, Spin, Typography, Segmented } from 'antd';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { fetchEngagementMetrics, fetchTopUsers } from '../../api/dashboard';
+import { MemberDrawer } from './InsightDrawers';
 import {
   SoftCard,
   Toolbar,
@@ -9,6 +10,7 @@ import {
   COLORS,
   ErrorAlert,
   ReloadButton,
+  ClickText,
   formatDate,
   formatShort,
   formatNumber,
@@ -36,6 +38,7 @@ const TOP_PAGE_SIZE = 10;
 function TopUsers({ reloadKey }) {
   const [type, setType] = useState('STAMP');
   const [page, setPage] = useState(0);
+  const [member, setMember] = useState(null);
   const fetcher = useCallback(() => fetchTopUsers({ type, page, size: TOP_PAGE_SIZE }), [type, page]);
   const { data, loading, error, load } = useRemote(fetcher);
 
@@ -46,7 +49,11 @@ function TopUsers({ reloadKey }) {
   const label = TOP_USER_TYPES.find((t) => t.value === type)?.label;
   const columns = [
     { title: '순위', key: 'rank', width: 60, render: (_, __, i) => page * TOP_PAGE_SIZE + i + 1 },
-    { title: '닉네임', dataIndex: 'nickname', render: (n, r) => `${n ?? '-'} (${r.userId})` },
+    {
+      title: '닉네임',
+      dataIndex: 'nickname',
+      render: (n, r) => <ClickText onClick={() => setMember({ id: r.userId, nickname: n })}>{`${n ?? '-'} (${r.userId})`}</ClickText>,
+    },
     { title: '이메일', dataIndex: 'email', render: (e) => e || <Text type="secondary">-</Text> },
     { title: label, dataIndex: 'count', align: 'right', width: 90, render: formatNumber },
   ];
@@ -83,7 +90,8 @@ function TopUsers({ reloadKey }) {
         }}
         size="small"
       />
-      <HintText>회원(탈퇴 제외)만 · 이메일 = 가장 먼저 연결한 소셜 계정</HintText>
+      <HintText>회원(탈퇴 제외)만 · 이메일 = 가장 먼저 연결한 소셜 계정 · 닉네임을 누르면 회원 상세</HintText>
+      <MemberDrawer member={member} onClose={() => setMember(null)} />
     </SoftCard>
   );
 }
