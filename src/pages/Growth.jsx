@@ -14,6 +14,7 @@ import {
 import dayjs from 'dayjs';
 import styled from 'styled-components';
 import { fetchGrowthMetrics } from '../api/growth';
+import UserMetricsSection from './growth/UserMetricsSection';
 
 const { Text } = Typography;
 
@@ -122,6 +123,7 @@ export default function Growth() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -152,7 +154,14 @@ export default function Growth() {
         </Text>
         <div style={{ display: 'flex', gap: 8 }}>
           <Segmented options={RANGE_OPTIONS} value={days} onChange={setDays} />
-          <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => {
+              load();
+              setReloadKey((k) => k + 1);
+            }}
+            loading={loading}
+          >
             새로고침
           </Button>
         </div>
@@ -232,6 +241,8 @@ export default function Growth() {
           </>
         )}
       </Spin>
+
+      <UserMetricsSection days={days} reloadKey={reloadKey} />
     </div>
   );
 }
