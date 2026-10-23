@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Card, Row, Col, Statistic, Segmented, Button, Alert, Spin, Typography } from 'antd';
+import { Card, Row, Col, Statistic, Segmented, Button, Alert, Spin, Typography, Tabs } from 'antd';
 import { ReloadOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
 import {
   ResponsiveContainer,
@@ -14,7 +14,9 @@ import {
 import dayjs from 'dayjs';
 import styled from 'styled-components';
 import { fetchGrowthMetrics } from '../api/growth';
-import UserMetricsSection from './growth/UserMetricsSection';
+import { fetchUserMetrics } from '../api/dashboard';
+import { ErrorAlert, useRemote } from './opsMetrics/ui';
+import { SignupRetentionPanel, ActivationPanel, ConsoleLinksPanel } from './growth/UserMetricsPanels';
 
 const { Text } = Typography;
 
@@ -123,7 +125,6 @@ export default function Growth() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [reloadKey, setReloadKey] = useState(0);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -137,6 +138,9 @@ export default function Growth() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const userFetcher = useCallback(() => fetchUserMetrics({ days }), [days]);
+  const users = useRemote(userFetcher);
 
   const chartData = (data?.daily || []).map((p) => ({ ...p, label: formatShort(p.date) }));
 
@@ -158,91 +162,122 @@ export default function Growth() {
             icon={<ReloadOutlined />}
             onClick={() => {
               load();
-              setReloadKey((k) => k + 1);
+              users.load();
             }}
-            loading={loading}
+            loading={loading || users.loading}
           >
             새로고침
           </Button>
         </div>
       </Toolbar>
 
-      {error && <Alert type="error" showIcon message="성장 지표 조회 실패" description={error} style={{ marginBottom: 16 }} />}
+      <Tabs
+        items={[
+          {
+            key: 'core',
+            label: '핵심',
+            children: (
+              <>
+            {error && <Alert type="error" showIcon message="성장 지표 조회 실패" description={error} style={{ marginBottom: 16 }} />}
 
-      <Spin spinning={loading && !data}>
-        {data && (
-          <>
-            <CoverageAlert data={data} />
+            <Spin spinning={loading && !data}>
+              {data && (
+                <>
+                  <CoverageAlert data={data} />
 
-            <Row gutter={[16, 16]}>
-              <Col xs={24} sm={12} lg={6}>
-                <SoftCard>
-                  <Statistic title="DAU (어제)" value={data.dau.value} suffix="명" />
-                  <ChangeText metric={data.dau} previousLabel="30일 전" />
-                </SoftCard>
-              </Col>
-              <Col xs={24} sm={12} lg={6}>
-                <SoftCard>
-                  <Statistic title="MAU (최근 30일)" value={data.mau.value} suffix="명" />
-                  <ChangeText metric={data.mau} previousLabel="전월(직전 30일)" />
-                </SoftCard>
-              </Col>
-              <Col xs={24} sm={12} lg={6}>
-                <SoftCard>
-                  <Statistic title="평균 DAU (최근 30일)" value={data.averageDau.value} precision={1} suffix="명" />
-                  <ChangeText metric={data.averageDau} previousLabel="전월(직전 30일)" />
-                </SoftCard>
-              </Col>
-              <Col xs={24} sm={12} lg={6}>
-                <SoftCard>
-                  <Statistic
-                    title="DAU / MAU"
-                    value={data.stickiness ?? '-'}
-                    precision={data.stickiness == null ? undefined : 1}
-                    suffix={data.stickiness == null ? '' : '%'}
-                  />
-                  <HintText>오늘 지금까지 {data.todayDau.toLocaleString()}명 이용 (집계 중)</HintText>
-                </SoftCard>
-              </Col>
-            </Row>
+                  <Row gutter={[16, 16]}>
+                    <Col xs={24} sm={12} lg={6}>
+                      <SoftCard>
+                        <Statistic title="DAU (어제)" value={data.dau.value} suffix="명" />
+                        <ChangeText metric={data.dau} previousLabel="30일 전" />
+                      </SoftCard>
+                    </Col>
+                    <Col xs={24} sm={12} lg={6}>
+                      <SoftCard>
+                        <Statistic title="MAU (최근 30일)" value={data.mau.value} suffix="명" />
+                        <ChangeText metric={data.mau} previousLabel="전월(직전 30일)" />
+                      </SoftCard>
+                    </Col>
+                    <Col xs={24} sm={12} lg={6}>
+                      <SoftCard>
+                        <Statistic title="평균 DAU (최근 30일)" value={data.averageDau.value} precision={1} suffix="명" />
+                        <ChangeText metric={data.averageDau} previousLabel="전월(직전 30일)" />
+                      </SoftCard>
+                    </Col>
+                    <Col xs={24} sm={12} lg={6}>
+                      <SoftCard>
+                        <Statistic
+                          title="DAU / MAU"
+                          value={data.stickiness ?? '-'}
+                          precision={data.stickiness == null ? undefined : 1}
+                          suffix={data.stickiness == null ? '' : '%'}
+                        />
+                        <HintText>오늘 지금까지 {data.todayDau.toLocaleString()}명 이용 (집계 중)</HintText>
+                      </SoftCard>
+                    </Col>
+                  </Row>
 
-            <SoftCard title={`일별 추이 (최근 ${days}일)`} style={{ marginTop: 16, height: 'auto' }}>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="label" tick={{ fontSize: 12 }} minTickGap={16} />
-                  <YAxis yAxisId="dau" allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <YAxis yAxisId="mau" orientation="right" allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <Tooltip labelFormatter={(_, payload) => formatDate(payload?.[0]?.payload?.date)} />
-                  <Legend />
-                  <Line yAxisId="dau" type="monotone" dataKey="dau" name="DAU" stroke={DAU_COLOR} strokeWidth={2} dot={false} />
-                  <Line
-                    yAxisId="mau"
-                    type="monotone"
-                    dataKey="mau"
-                    name="MAU (그날까지 30일)"
-                    stroke={MAU_COLOR}
-                    strokeWidth={2}
-                    dot={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </SoftCard>
+                  <SoftCard title={`일별 추이 (최근 ${days}일)`} style={{ marginTop: 16, height: 'auto' }}>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                        <XAxis dataKey="label" tick={{ fontSize: 12 }} minTickGap={16} />
+                        <YAxis yAxisId="dau" allowDecimals={false} tick={{ fontSize: 12 }} />
+                        <YAxis yAxisId="mau" orientation="right" allowDecimals={false} tick={{ fontSize: 12 }} />
+                        <Tooltip labelFormatter={(_, payload) => formatDate(payload?.[0]?.payload?.date)} />
+                        <Legend />
+                        <Line yAxisId="dau" type="monotone" dataKey="dau" name="DAU" stroke={DAU_COLOR} strokeWidth={2} dot={false} />
+                        <Line
+                          yAxisId="mau"
+                          type="monotone"
+                          dataKey="mau"
+                          name="MAU (그날까지 30일)"
+                          stroke={MAU_COLOR}
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </SoftCard>
 
-            <SoftCard title="집계 기준" style={{ marginTop: 16, height: 'auto' }}>
-              <DefinitionList>
-                <li>DAU: 그날 로그인 상태로 앱을 1번 이상 쓴 계정 수</li>
-                <li>MAU: 기준일 포함 최근 30일 동안 1번 이상 쓴 계정 수</li>
-                <li>전월 대비: 바로 앞 30일 구간과 비교. DAU 는 30일 전 같은 날과 비교</li>
-                <li>DAU / MAU: 평균 DAU ÷ MAU. 한 달 중 며칠꼴로 들어오는지 보는 지표</li>
-                <li>GA 분석의 "활성 사용자"는 기기 단위(로그인 무관, 랜딩 웹 포함)라 이 숫자와 다름</li>
-              </DefinitionList>
-            </SoftCard>
-          </>
-        )}
-      </Spin>
-
-      <UserMetricsSection days={days} reloadKey={reloadKey} />
+                  <SoftCard title="집계 기준" style={{ marginTop: 16, height: 'auto' }}>
+                    <DefinitionList>
+                      <li>DAU: 그날 로그인 상태로 앱을 1번 이상 쓴 계정 수</li>
+                      <li>MAU: 기준일 포함 최근 30일 동안 1번 이상 쓴 계정 수</li>
+                      <li>전월 대비: 바로 앞 30일 구간과 비교. DAU 는 30일 전 같은 날과 비교</li>
+                      <li>DAU / MAU: 평균 DAU ÷ MAU. 한 달 중 며칠꼴로 들어오는지 보는 지표</li>
+                      <li>GA 분석의 "활성 사용자"는 기기 단위(로그인 무관, 랜딩 웹 포함)라 이 숫자와 다름</li>
+                    </DefinitionList>
+                  </SoftCard>
+                </>
+              )}
+            </Spin>
+              </>
+            ),
+          },
+          {
+            key: 'signup',
+            label: '가입·리텐션',
+            children: (
+              <>
+                <ErrorAlert title="가입 지표 조회 실패" error={users.error} />
+                <Spin spinning={users.loading && !users.data}>{users.data && <SignupRetentionPanel data={users.data} days={days} />}</Spin>
+              </>
+            ),
+          },
+          {
+            key: 'activation',
+            label: '활성화 비율',
+            children: (
+              <>
+                <ErrorAlert title="가입 지표 조회 실패" error={users.error} />
+                <Spin spinning={users.loading && !users.data}>{users.data && <ActivationPanel data={users.data} />}</Spin>
+              </>
+            ),
+          },
+          { key: 'console', label: '크래시율·스토어 평점', children: <ConsoleLinksPanel /> },
+        ]}
+      />
     </div>
   );
 }
