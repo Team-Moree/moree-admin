@@ -15,6 +15,7 @@ const DAY_OPTIONS = [
 const num = (title, dataIndex) => ({ title, dataIndex, align: 'right', render: formatNumber });
 
 const columns = [
+  { title: '국가', dataIndex: 'country', width: 70 },
   { title: '시·군·구', dataIndex: 'district' },
   num('발도장', 'stamps'),
   num('뽑기', 'gachas'),

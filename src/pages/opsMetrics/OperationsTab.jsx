@@ -33,6 +33,7 @@ const fandomColumns = [
 ];
 
 const submissionColumns = [
+  { title: '국가', dataIndex: 'country', width: 70 },
   { title: '지역', dataIndex: 'region' },
   num('대기', 'pending'),
   num('승인', 'approved'),
