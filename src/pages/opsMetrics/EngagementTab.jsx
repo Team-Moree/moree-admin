@@ -1,6 +1,7 @@
-import { Row, Col, Statistic, Table, Alert, Spin, Typography } from 'antd';
+import { useCallback, useEffect, useState } from 'react';
+import { Row, Col, Statistic, Table, Alert, Spin, Typography, Segmented } from 'antd';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
-import { fetchEngagementMetrics } from '../../api/dashboard';
+import { fetchEngagementMetrics, fetchTopUsers } from '../../api/dashboard';
 import {
   SoftCard,
   Toolbar,
@@ -25,19 +26,71 @@ function RateCard({ title, rate, hint }) {
   );
 }
 
-const userColumns = (countLabel) => [
-  { title: '닉네임', dataIndex: 'nickname', render: (n, r) => `${n ?? '-'} (${r.userId})` },
-  { title: countLabel, dataIndex: 'count', align: 'right', render: formatNumber },
+const TOP_USER_TYPES = [
+  { value: 'STAMP', label: '발도장' },
+  { value: 'REVIEW', label: '리뷰' },
+  { value: 'FOLLOWER', label: '팔로워' },
 ];
+const TOP_PAGE_SIZE = 10;
 
-const TOP_USERS = [
-  { key: 'stamps', title: '발도장 많은 회원', label: '발도장' },
-  { key: 'reviews', title: '리뷰 많은 회원', label: '리뷰' },
-  { key: 'followers', title: '팔로워 많은 회원', label: '팔로워' },
-];
+function TopUsers({ reloadKey }) {
+  const [type, setType] = useState('STAMP');
+  const [page, setPage] = useState(0);
+  const fetcher = useCallback(() => fetchTopUsers({ type, page, size: TOP_PAGE_SIZE }), [type, page]);
+  const { data, loading, error, load } = useRemote(fetcher);
+
+  useEffect(() => {
+    if (reloadKey) load();
+  }, [reloadKey, load]);
+
+  const label = TOP_USER_TYPES.find((t) => t.value === type)?.label;
+  const columns = [
+    { title: '순위', key: 'rank', width: 60, render: (_, __, i) => page * TOP_PAGE_SIZE + i + 1 },
+    { title: '닉네임', dataIndex: 'nickname', render: (n, r) => `${n ?? '-'} (${r.userId})` },
+    { title: '이메일', dataIndex: 'email', render: (e) => e || <Text type="secondary">-</Text> },
+    { title: label, dataIndex: 'count', align: 'right', width: 90, render: formatNumber },
+  ];
+
+  return (
+    <SoftCard
+      title={`${label} 많은 회원`}
+      style={{ marginTop: 16, height: 'auto' }}
+      extra={
+        <Segmented
+          size="small"
+          options={TOP_USER_TYPES}
+          value={type}
+          onChange={(v) => {
+            setType(v);
+            setPage(0);
+          }}
+        />
+      }
+    >
+      <ErrorAlert title="상위 회원 조회 실패" error={error} />
+      <Table
+        columns={columns}
+        dataSource={data?.items || []}
+        rowKey="userId"
+        loading={loading}
+        pagination={{
+          current: page + 1,
+          pageSize: TOP_PAGE_SIZE,
+          total: data?.total || 0,
+          showSizeChanger: false,
+          hideOnSinglePage: true,
+          onChange: (p) => setPage(p - 1),
+        }}
+        size="small"
+      />
+      <HintText>회원(탈퇴 제외)만 · 이메일 = 가장 먼저 연결한 소셜 계정</HintText>
+    </SoftCard>
+  );
+}
 
 export default function EngagementTab() {
   const { data, loading, error, load } = useRemote(fetchEngagementMetrics);
+  const [reloadKey, setReloadKey] = useState(0);
   const gacha = data?.gachaParticipation;
   const noFandom = data?.noFandom;
   const dormant = data?.dormant;
@@ -47,7 +100,13 @@ export default function EngagementTab() {
     <div>
       <Toolbar>
         <Text type="secondary">회원(탈퇴 제외) 기준</Text>
-        <ReloadButton onClick={load} loading={loading} />
+        <ReloadButton
+          onClick={() => {
+            load();
+            setReloadKey((k) => k + 1);
+          }}
+          loading={loading}
+        />
       </Toolbar>
       <ErrorAlert title="참여 지표 조회 실패" error={error} />
       <Spin spinning={loading && !data}>
@@ -102,21 +161,7 @@ export default function EngagementTab() {
               <HintText>숨김 리뷰 포함 · 월요일 시작 주</HintText>
             </SoftCard>
 
-            <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-              {TOP_USERS.map((t) => (
-                <Col xs={24} lg={8} key={t.key}>
-                  <SoftCard title={t.title}>
-                    <Table
-                      columns={userColumns(t.label)}
-                      dataSource={data.topUsers?.[t.key] || []}
-                      rowKey="userId"
-                      pagination={false}
-                      size="small"
-                    />
-                  </SoftCard>
-                </Col>
-              ))}
-            </Row>
+            <TopUsers reloadKey={reloadKey} />
           </>
         )}
       </Spin>
