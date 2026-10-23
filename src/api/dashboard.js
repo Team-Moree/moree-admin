@@ -6,6 +6,8 @@ export const fetchUserMetrics = ({ days } = {}) => get('/users', { days });
 
 export const fetchSupplyMetrics = () => get('/supply');
 
+export const fetchPushMetrics = ({ days } = {}) => get('/pushes', { days });
+
 export const fetchAppOpenHours = ({ days } = {}) => get('/app-open-hours', { days });
 
 export const fetchPushTargets = ({ type, page, size } = {}) => get('/push-targets', { type, page, size });

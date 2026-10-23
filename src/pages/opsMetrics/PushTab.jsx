@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react';
-import { Row, Col, Segmented, Table, Spin, Button, Tag, Typography } from 'antd';
+import { Row, Col, Segmented, Table, Spin, Button, Tag, Typography, Statistic, Alert } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
-import { fetchAppOpenHours, fetchPushTargets } from '../../api/dashboard';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ComposedChart, Line, Legend } from 'recharts';
+import { fetchAppOpenHours, fetchPushMetrics, fetchPushTargets } from '../../api/dashboard';
+import dayjs from 'dayjs';
 import { SoftCard, Toolbar, HintText, COLORS, ErrorAlert, ReloadButton, formatDate, formatNumber, useRemote } from './ui';
 
 const { Text } = Typography;
@@ -32,6 +33,116 @@ function downloadCsv(filename, rows) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+const PUSH_DAY_OPTIONS = [
+  { label: '이번 주', value: 'week' },
+  { label: '7일', value: 7 },
+  { label: '30일', value: 30 },
+];
+
+const rateText = (rate, opened) => `${rate ?? 0}% (${formatNumber(opened)})`;
+
+const pushColumns = [
+  {
+    title: '발송',
+    dataIndex: 'firstSentAt',
+    width: 120,
+    render: (v, r) =>
+      dayjs(v).format('M/D HH:mm') + (dayjs(r.lastSentAt).diff(dayjs(v), 'minute') >= 1 ? ` ~ ${dayjs(r.lastSentAt).format('HH:mm')}` : ''),
+  },
+  { title: '종류', dataIndex: 'typeLabel', width: 130, render: (v) => <Tag>{v}</Tag> },
+  { title: '제목', dataIndex: 'title' },
+  { title: '대상', dataIndex: 'sent', align: 'right', width: 70, render: formatNumber },
+  { title: '도달', dataIndex: 'delivered', align: 'right', width: 70, render: formatNumber },
+  { title: '클릭률', key: 'rate', align: 'right', width: 110, render: (_, r) => rateText(r.openRate, r.opened) },
+];
+
+function weekDays() {
+  const dow = dayjs().day();
+  return dow === 0 ? 7 : dow;
+}
+
+function SentPushes() {
+  const [range, setRange] = useState('week');
+  const days = range === 'week' ? weekDays() : range;
+  const fetcher = useCallback(() => fetchPushMetrics({ days }), [days]);
+  const { data, loading, error, load } = useRemote(fetcher);
+  const hours = (data?.hours || []).map((h) => ({ ...h, label: `${h.hour}시` }));
+  const noOpens = data && data.totals.delivered > 0 && data.totals.opened === 0;
+
+  return (
+    <SoftCard
+      title="보낸 푸시"
+      extra={
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Segmented options={PUSH_DAY_OPTIONS} value={range} onChange={setRange} />
+          <ReloadButton onClick={load} loading={loading} />
+        </div>
+      }
+    >
+      <ErrorAlert title="푸시 조회 실패" error={error} />
+      {noOpens && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          title="아직 클릭이 0건"
+          description="앱이 푸시를 열 때 서버에 열림 기록을 보내야 클릭률이 잡힘. 앱 업데이트 전에는 0% 로 나옴."
+        />
+      )}
+      <Spin spinning={loading}>
+        {data && (
+          <>
+            <Row gutter={[16, 16]}>
+              <Col xs={12} md={6}>
+                <Statistic title="보낸 푸시" value={data.totals.sent} suffix="건" />
+              </Col>
+              <Col xs={12} md={6}>
+                <Statistic title="도달" value={data.totals.delivered} suffix="건" />
+              </Col>
+              <Col xs={12} md={6}>
+                <Statistic title="클릭" value={data.totals.opened} suffix="건" />
+              </Col>
+              <Col xs={12} md={6}>
+                <Statistic title="클릭률" value={data.totals.openRate} precision={1} suffix="%" />
+              </Col>
+            </Row>
+            <Table
+              style={{ marginTop: 16 }}
+              columns={pushColumns}
+              dataSource={data.pushes}
+              rowKey={(r) => `${r.pushType}-${r.title}-${r.firstSentAt}`}
+              pagination={{ pageSize: 20, hideOnSinglePage: true }}
+              size="small"
+            />
+            <SectionLabel>발송 시간대별 클릭률</SectionLabel>
+            <ResponsiveContainer width="100%" height={260}>
+              <ComposedChart data={hours} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 12 }} interval={1} />
+                <YAxis yAxisId="count" allowDecimals={false} tick={{ fontSize: 12 }} />
+                <YAxis yAxisId="rate" orientation="right" unit="%" domain={[0, 100]} tick={{ fontSize: 12 }} />
+                <Tooltip
+                  formatter={(v, name) => (name === '클릭률' ? [`${v}%`, name] : [`${formatNumber(v)}건`, name])}
+                />
+                <Legend />
+                <Bar yAxisId="count" dataKey="delivered" name="도달" fill={COLORS.gray} radius={[3, 3, 0, 0]} />
+                <Line yAxisId="rate" dataKey="openRate" name="클릭률" stroke={COLORS.purple} strokeWidth={2} dot={false} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </>
+        )}
+      </Spin>
+      <HintText>
+        {formatDate(data?.from)} ~ {formatDate(data?.to)} · 같은 종류·제목·날짜로 묶음 · 클릭률 = 클릭 ÷ 도달 · 도달 = FCM 발송 성공
+      </HintText>
+    </SoftCard>
+  );
+}
+
+function SectionLabel({ children }) {
+  return <div style={{ margin: '20px 0 8px', fontWeight: 600 }}>{children}</div>;
 }
 
 function AppOpenHours() {
@@ -140,6 +251,9 @@ function PushTargets() {
 export default function PushTab() {
   return (
     <Row gutter={[16, 16]}>
+      <Col span={24}>
+        <SentPushes />
+      </Col>
       <Col span={24}>
         <AppOpenHours />
       </Col>
