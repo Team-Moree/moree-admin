@@ -46,8 +46,7 @@ const rateText = (rate, opened) => `${rate ?? 0}% (${formatNumber(opened)})`;
 
 const pushColumns = [
   { title: '발송일', dataIndex: 'sentDate', width: 100, render: (v) => dayjs(v).format('M/D (dd)') },
-  { title: '종류', dataIndex: 'typeLabel', width: 130, render: (v) => <Tag>{v}</Tag> },
-  { title: '제목', dataIndex: 'title' },
+  { title: '종류', dataIndex: 'typeLabel', render: (v) => <Tag>{v}</Tag> },
   { title: '도달', dataIndex: 'delivered', align: 'right', width: 70, render: formatNumber },
   { title: '클릭률', key: 'rate', align: 'right', width: 110, render: (_, r) => rateText(r.openRate, r.opened) },
 ];
@@ -103,7 +102,7 @@ function SentPushes() {
               style={{ marginTop: 16 }}
               columns={pushColumns}
               dataSource={data.pushes}
-              rowKey={(r) => `${r.pushType}-${r.title}-${r.sentDate}`}
+              rowKey="pushId"
               pagination={{ pageSize: 20, hideOnSinglePage: true }}
               size="small"
             />
@@ -126,7 +125,7 @@ function SentPushes() {
         )}
       </Spin>
       <HintText>
-        {formatDate(data?.from)} ~ {formatDate(data?.to)} · 같은 종류·제목·날짜로 묶음 · 클릭률 = 클릭 ÷ 도달 · 매시 5분 갱신 · 최근 30일 보관
+        {formatDate(data?.from)} ~ {formatDate(data?.to)} · 발송일·종류로 묶음 · 클릭률 = 클릭 ÷ 도달 · 최근 30일 보관
       </HintText>
     </SoftCard>
   );
