@@ -8,11 +8,6 @@ import { MemberDrawer } from './InsightDrawers';
 
 const { Text } = Typography;
 
-const DAY_OPTIONS = [
-  { label: '7일', value: 7 },
-  { label: '30일', value: 30 },
-  { label: '90일', value: 90 },
-];
 const TARGET_TYPES = [
   { label: '북마크만 하고 안 간 매장 있음', value: 'BOOKMARKED_NOT_VISITED' },
   { label: '북마크한 매장이 종료됨', value: 'BOOKMARKED_CLOSED' },
@@ -36,20 +31,14 @@ function downloadCsv(filename, rows) {
 }
 
 function AppOpenHours() {
-  const [days, setDays] = useState(30);
-  const fetcher = useCallback(() => fetchAppOpenHours({ days }), [days]);
+  const fetcher = useCallback(() => fetchAppOpenHours({ days: 30 }), []);
   const { data, loading, error, load } = useRemote(fetcher);
   const chartData = (data?.hours || []).map((h) => ({ ...h, label: `${h.hour}시` }));
 
   return (
     <SoftCard
-      title="앱 접속 시간대"
-      extra={
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Segmented options={DAY_OPTIONS} value={days} onChange={setDays} />
-          <ReloadButton onClick={load} loading={loading} />
-        </div>
-      }
+      title="앱 접속 시간대 (최근 30일)"
+      extra={<ReloadButton onClick={load} loading={loading} />}
     >
       <ErrorAlert title="접속 시간대 조회 실패" error={error} />
       <Spin spinning={loading}>
