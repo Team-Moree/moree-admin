@@ -64,7 +64,7 @@ function AppOpenHours() {
         </ResponsiveContainer>
       </Spin>
       <HintText>
-        하루 첫 접속 시각 기준 (오픈 횟수 전체 아님) · {formatDate(data?.from)} ~ {formatDate(data?.to)}
+        회원별 하루 첫 접속 시각 기준 (같은 날 여러 번 열어도 1번만 셈) · {formatDate(data?.from)} ~ {formatDate(data?.to)}
       </HintText>
     </SoftCard>
   );
