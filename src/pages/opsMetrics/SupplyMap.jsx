@@ -10,7 +10,10 @@ const COUNTRY_VIEW = {
   해외: { center: { lat: 30, lng: 0 }, zoom: 2 },
 };
 
-export default function SupplyMap({ points, country, height = 480 }) {
+const defaultColorOf = (p) => (p.isPopup ? COLORS.pink : COLORS.blue);
+const defaultLabelOf = (p) => (p.isPopup ? '팝업' : '상설 매장');
+
+export default function SupplyMap({ points, country, height = 480, colorOf = defaultColorOf, labelOf = defaultLabelOf, fit = false }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const clustererRef = useRef(null);
@@ -50,7 +53,7 @@ export default function SupplyMap({ points, country, height = 480 }) {
     const map = mapRef.current;
     const infoWindow = new InfoWindow();
     const markers = points.map((p) => {
-      const color = p.isPopup ? COLORS.pink : COLORS.blue;
+      const color = colorOf(p);
       const pin = new PinElement({ background: color, borderColor: color, glyphColor: '#fff', scale: 0.8 });
       const marker = new AdvancedMarkerElement({
         position: { lat: p.latitude, lng: p.longitude },
@@ -59,7 +62,7 @@ export default function SupplyMap({ points, country, height = 480 }) {
         gmpClickable: true,
       });
       marker.addEventListener('gmp-click', () => {
-        infoWindow.setContent(`<div style="font-size:13px"><b>${escapeHtml(p.title)}</b><br/>${p.isPopup ? '팝업' : '상설 매장'}</div>`);
+        infoWindow.setContent(`<div style="font-size:13px"><b>${escapeHtml(p.title)}</b><br/>${escapeHtml(labelOf(p))}</div>`);
         infoWindow.open({ map, anchor: marker });
       });
       return marker;
@@ -68,7 +71,7 @@ export default function SupplyMap({ points, country, height = 480 }) {
     clustererRef.current.addMarkers(markers);
 
     const view = COUNTRY_VIEW[country] || COUNTRY_VIEW.한국;
-    if (points.length > 1 && country === '일본') {
+    if (points.length > 1 && (fit || country === '일본')) {
       const bounds = new window.google.maps.LatLngBounds();
       points.forEach((p) => bounds.extend({ lat: p.latitude, lng: p.longitude }));
       map.fitBounds(bounds, 40);
@@ -77,7 +80,7 @@ export default function SupplyMap({ points, country, height = 480 }) {
       map.setZoom(points.length === 1 ? 16 : view.zoom);
     }
     return () => infoWindow.close();
-  }, [ready, points, country]);
+  }, [ready, points, country, colorOf, labelOf, fit]);
 
   if (loadError) return <Alert type="warning" showIcon title={loadError} />;
 

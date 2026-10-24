@@ -14,6 +14,9 @@ export const fetchOperationsMetrics = () => get('/operations');
 
 export const fetchStoresByRequests = ({ page, size } = {}) => get('/operations/stores-by-requests', { page, size });
 
+export const fetchFandomTargetRequests = ({ categoryId, status, page, size } = {}) =>
+  get('/operations/fandom-target-requests', { categoryId, status, page, size });
+
 export const fetchExploreFandomTargets = ({ categoryId, page, size } = {}) =>
   get('/explore/fandom-targets', { categoryId, page, size });
 
