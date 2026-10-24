@@ -67,17 +67,16 @@ const submissionColorOf = (p) => STATUS[p.status]?.color || COLORS.gray;
 const submissionLabelOf = (p) => `${STATUS[p.status]?.label || p.status} · ${p.creatorNickname || `회원 ${p.creatorId}`}`;
 
 function FandomRequestList({ category }) {
-  const [status, setStatus] = useState('ALL');
   const [page, setPage] = useState(0);
   const fetcher = useCallback(
     () =>
       fetchFandomTargetRequests({
         categoryId: category.categoryId ?? undefined,
-        status: status === 'ALL' ? undefined : status,
+        status: 'PENDING',
         page,
         size: DETAIL_PAGE_SIZE,
       }),
-    [category, status, page],
+    [category, page],
   );
   const { data, loading, error } = useRemote(fetcher);
 
@@ -94,21 +93,11 @@ function FandomRequestList({ category }) {
         </div>
       ),
     },
-    { title: '상태', dataIndex: 'status', width: 70, render: statusTag },
     { title: '등록일', dataIndex: 'createdAt', width: 140, render: formatDateTime },
   ];
 
   return (
     <>
-      <Segmented
-        options={statusOptions(['PENDING', 'APPROVED', 'REJECTED'])}
-        value={status}
-        onChange={(v) => {
-          setStatus(v);
-          setPage(0);
-        }}
-        style={{ marginBottom: 12 }}
-      />
       <ErrorAlert title="덕질 대상 요청 조회 실패" error={error} />
       <Table
         columns={columns}
@@ -130,7 +119,7 @@ function FandomRequestList({ category }) {
 
 function FandomRequestDrawer({ category, onClose }) {
   return (
-    <Drawer title={`${category?.category} 덕질 대상 요청`} open={!!category} onClose={onClose} size={600} destroyOnHidden>
+    <Drawer title={`${category?.category} 대기 중 덕질 대상 요청`} open={!!category} onClose={onClose} size={600} destroyOnHidden>
       {category && <FandomRequestList category={category} />}
     </Drawer>
   );
