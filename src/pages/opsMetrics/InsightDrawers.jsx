@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from 'react';
-import { Drawer, Row, Col, Statistic, Table, Spin, Typography, Tag, Avatar, Descriptions } from 'antd';
+import { Drawer, Row, Col, Statistic, Table, Spin, Typography, Tag, Avatar, Descriptions, Image } from 'antd';
 import { UserOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
@@ -74,11 +74,31 @@ function StoreLocation({ id, title }) {
         : [],
     [data, id, title],
   );
-  if (!points.length) return null;
+  const images = data?.imageUrls || [];
+  if (!data) return null;
   return (
-    <div style={{ marginTop: 12 }}>
-      <SupplyMap points={points} country="한국" height={220} />
-    </div>
+    <>
+      {images.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', marginTop: 12 }}>
+          <Image.PreviewGroup>
+            {images.map((url, i) => (
+              <Image
+                key={`${url}-${i}`}
+                src={url}
+                width={120}
+                height={120}
+                style={{ objectFit: 'cover', borderRadius: 8 }}
+              />
+            ))}
+          </Image.PreviewGroup>
+        </div>
+      )}
+      {points.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <SupplyMap points={points} country="한국" height={220} />
+        </div>
+      )}
+    </>
   );
 }
 
