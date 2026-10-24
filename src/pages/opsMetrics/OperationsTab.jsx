@@ -10,16 +10,18 @@ const { Text } = Typography;
 
 const num = (title, dataIndex) => ({ title, dataIndex, align: 'right', render: formatNumber });
 
-const storeColumns = [
+const storeColumns = (openStore) => [
   {
     title: '매장',
     dataIndex: 'title',
     render: (title, r) => (
       <div>
-        <div>{title}</div>
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          {r.address}
-        </Text>
+        <ClickText onClick={() => openStore(r)}>{title}</ClickText>
+        <div>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {r.address}
+          </Text>
+        </div>
       </div>
     ),
   },
@@ -140,6 +142,7 @@ function SubmittedStores({ stores, region, onRegionChange }) {
   const [keyword, setKeyword] = useState('');
   const [store, setStore] = useState(null);
   const [member, setMember] = useState(null);
+  const openStore = useCallback((p) => setStore({ id: p.storeId, title: p.title }), []);
 
   useEffect(() => {
     const picked = region && stores.find((s) => s.region === region);
@@ -231,6 +234,7 @@ function SubmittedStores({ stores, region, onRegionChange }) {
         colorOf={submissionColorOf}
         labelOf={submissionLabelOf}
         fit
+        onSelect={openStore}
       />
       <HintText>
         주황 = 대기 · 초록 = 승인 · 빨강 = 반려 · 회색 = 숨김 · 위 지역별 표에서 지역을 누르면 그 지역만 보여줌
@@ -262,6 +266,7 @@ function StoresByRequests({ reloadKey }) {
   const [page, setPage] = useState(0);
   const fetcher = useCallback(() => fetchStoresByRequests({ page, size: STORE_PAGE_SIZE }), [page]);
   const { data, loading, error, load } = useRemote(fetcher);
+  const [store, setStore] = useState(null);
 
   useEffect(() => {
     if (reloadKey) load();
@@ -271,7 +276,7 @@ function StoresByRequests({ reloadKey }) {
     <SoftCard title="수정 요청·신고 많은 매장" extra={<Text type="secondary">총 {formatNumber(data?.totalStores)}곳</Text>}>
       <ErrorAlert title="매장 목록 조회 실패" error={error} />
       <Table
-        columns={storeColumns}
+        columns={storeColumns((r) => setStore({ id: r.storeId, title: r.title }))}
         dataSource={data?.stores || []}
         rowKey="storeId"
         loading={loading}
@@ -284,6 +289,7 @@ function StoresByRequests({ reloadKey }) {
         }}
         size="small"
       />
+      <StoreDrawer store={store} onClose={() => setStore(null)} />
     </SoftCard>
   );
 }

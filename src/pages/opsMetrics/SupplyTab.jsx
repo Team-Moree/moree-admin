@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Row, Col, Statistic, Table, Spin, Typography, Segmented, Input, Tag } from 'antd';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { fetchSupplyMetrics } from '../../api/dashboard';
@@ -35,6 +35,7 @@ export default function SupplyTab() {
   const [type, setType] = useState('ALL');
   const [keyword, setKeyword] = useState('');
   const [store, setStore] = useState(null);
+  const openStore = useCallback((p) => setStore({ id: p.storeId, title: p.title }), []);
 
   const countryOptions = useMemo(
     () =>
@@ -114,7 +115,7 @@ export default function SupplyTab() {
               <Segmented options={TYPES} value={type} onChange={setType} />
             </div>
             <SoftCard title={`${country} ${type === 'ALL' ? '매장' : typeLabel} 분포`} style={{ marginTop: 16, height: 'auto' }}>
-              <SupplyMap points={points} country={country} />
+              <SupplyMap points={points} country={country} onSelect={openStore} />
               <Text type="secondary" style={{ fontSize: 12 }}>
                 분홍 = 팝업 · 파랑 = 상설 매장 · 국가는 매장 좌표 기준
               </Text>

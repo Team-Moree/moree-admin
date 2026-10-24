@@ -13,7 +13,7 @@ const COUNTRY_VIEW = {
 const defaultColorOf = (p) => (p.isPopup ? COLORS.pink : COLORS.blue);
 const defaultLabelOf = (p) => (p.isPopup ? '팝업' : '상설 매장');
 
-export default function SupplyMap({ points, country, height = 480, colorOf = defaultColorOf, labelOf = defaultLabelOf, fit = false }) {
+export default function SupplyMap({ points, country, height = 480, colorOf = defaultColorOf, labelOf = defaultLabelOf, fit = false, onSelect }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const clustererRef = useRef(null);
@@ -62,7 +62,7 @@ export default function SupplyMap({ points, country, height = 480, colorOf = def
         gmpClickable: true,
       });
       marker.addEventListener('gmp-click', () => {
-        infoWindow.setContent(`<div style="font-size:13px"><b>${escapeHtml(p.title)}</b><br/>${escapeHtml(labelOf(p))}</div>`);
+        infoWindow.setContent(infoContent(p, labelOf(p), onSelect));
         infoWindow.open({ map, anchor: marker });
       });
       return marker;
@@ -80,7 +80,7 @@ export default function SupplyMap({ points, country, height = 480, colorOf = def
       map.setZoom(points.length === 1 ? 16 : view.zoom);
     }
     return () => infoWindow.close();
-  }, [ready, points, country, colorOf, labelOf, fit]);
+  }, [ready, points, country, colorOf, labelOf, fit, onSelect]);
 
   if (loadError) return <Alert type="warning" showIcon title={loadError} />;
 
@@ -91,6 +91,19 @@ export default function SupplyMap({ points, country, height = 480, colorOf = def
   );
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+function infoContent(p, label, onSelect) {
+  const root = document.createElement('div');
+  root.style.fontSize = '13px';
+  const title = document.createElement(onSelect ? 'a' : 'b');
+  title.textContent = p.title;
+  if (onSelect) {
+    title.style.fontWeight = '600';
+    title.style.cursor = 'pointer';
+    title.addEventListener('click', () => onSelect(p));
+  }
+  const sub = document.createElement('div');
+  sub.textContent = onSelect ? `${label} · 눌러서 상세 보기` : label;
+  sub.style.color = '#8c8c8c';
+  root.append(title, sub);
+  return root;
 }
