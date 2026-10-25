@@ -25,6 +25,7 @@ const NOISE_URI_FILTER = 'uri!~"/actuator.*|/health|/swagger-ui.*|/v3/api-docs.*
 // 한 번에 동시에 보낼 Prometheus 쿼리 수. 14개를 전부 한번에 보내면 Grafana Cloud가 503으로
 // 끊길 때가 있어 이 수만큼만 동시에 보낸다.
 const METRICS_QUERY_CONCURRENCY = 4;
+const RETRY_DELAY_MS = 500;
 
 class HttpError extends Error {
   constructor(status, code, message) {
@@ -69,12 +70,31 @@ async function promRequest(config, path, params) {
   );
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
 
-  const resp = await fetch(url, {
-    headers: { Authorization: `Bearer ${config.token}` },
-  });
-  const body = await resp.json();
-  if (!resp.ok || body.status !== 'success') {
-    throw new HttpError(502, 'PROM_QUERY_FAILED', body?.error || `Prometheus 쿼리 실패 (${resp.status})`);
+  const doFetch = () => fetch(url, { headers: { Authorization: `Bearer ${config.token}` } });
+  let resp = await doFetch();
+  // 일시적 503/429는 한 번만 재시도한다.
+  if (resp.status === 503 || resp.status === 429) {
+    await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+    resp = await doFetch();
+  }
+
+  const text = await resp.text();
+  let body = null;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    // Grafana 프록시/게이트웨이가 JSON이 아닌 본문을 줄 수 있어 원문을 그대로 쓴다.
+  }
+  if (!resp.ok || body?.status !== 'success') {
+    // Grafana 프록시 오류는 error 가 아니라 message 로 내려오는 경우가 많다.
+    const reason = String(body?.error || body?.message || text).slice(0, 200);
+    console.error('[metrics] Grafana query failed', {
+      status: resp.status,
+      path,
+      reason,
+      traceId: body?.traceID,
+    });
+    throw new HttpError(502, 'PROM_QUERY_FAILED', `Prometheus 쿼리 실패 (${resp.status}): ${reason}`);
   }
   return body.data;
 }
