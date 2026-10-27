@@ -28,12 +28,7 @@ dayjs.extend(relativeTime);
 const { Text } = Typography;
 
 const PageTitle = styled.h2`
-  margin-bottom: 4px;
-`;
-const SubText = styled.p`
-  color: #8c8c8c;
-  margin-bottom: 20px;
-  font-size: 13px;
+  margin-bottom: 16px;
 `;
 const SectionTitle = styled.h4`
   margin: 4px 0 10px;
@@ -70,6 +65,7 @@ const BigValue = styled.div`
   line-height: 1.3;
   color: ${(p) => p.$color || '#1f1f1f'};
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 `;
 const ChartLabel = styled.div`
   font-size: 12px;
@@ -240,14 +236,14 @@ function NowRow({ data }) {
       <Col xs={24} sm={12} lg={6}>
         <SoftCard>
           <CardLabel>응답시간 (업로드 제외)</CardLabel>
-          <Space size={24}>
+          <Space size={[20, 0]} wrap>
             <BigValue $color={data.latencyMax >= 3 ? ORANGE : undefined}>
               {formatSeconds(data.latencyMax)}
-              <Text type="secondary" style={{ fontSize: 13, marginLeft: 4 }}>최대</Text>
+              <Text type="secondary" style={{ fontSize: 13, marginLeft: 4, whiteSpace: 'nowrap' }}>최대</Text>
             </BigValue>
             <BigValue>
               {formatSeconds(data.latencyAvg)}
-              <Text type="secondary" style={{ fontSize: 13, marginLeft: 4 }}>평균</Text>
+              <Text type="secondary" style={{ fontSize: 13, marginLeft: 4, whiteSpace: 'nowrap' }}>평균</Text>
             </BigValue>
           </Space>
           <HintText>평균은 괜찮은데 최대만 크면 일부 요청만 느렸던 것 - 아래 최대 응답시간 선에서 시각 확인</HintText>
@@ -256,14 +252,14 @@ function NowRow({ data }) {
       <Col xs={24} sm={12} lg={6}>
         <SoftCard>
           <CardLabel>실패</CardLabel>
-          <Space size={24}>
+          <Space size={[20, 0]} wrap>
             <BigValue $color={data.error5xx >= 0.5 ? RED : undefined}>
               {count(data.error5xx)}
-              <Text type="secondary" style={{ fontSize: 13, marginLeft: 4 }}>5xx</Text>
+              <Text type="secondary" style={{ fontSize: 13, marginLeft: 4, whiteSpace: 'nowrap' }}>5xx</Text>
             </BigValue>
             <BigValue $color={data.errorLogs >= 0.5 ? RED : undefined}>
               {count(data.errorLogs)}
-              <Text type="secondary" style={{ fontSize: 13, marginLeft: 4 }}>ERROR</Text>
+              <Text type="secondary" style={{ fontSize: 13, marginLeft: 4, whiteSpace: 'nowrap' }}>ERROR</Text>
             </BigValue>
           </Space>
           {data.error5xxTopUris.length > 0 ? (
@@ -278,7 +274,7 @@ function NowRow({ data }) {
               ))}
             </div>
           ) : (
-            <HintText>ERROR는 Discord 알림과 같은 출처. 여기엔 있는데 Discord가 조용하면 알림 경로 고장</HintText>
+            <HintText>5xx = 실패한 요청, ERROR = 앱 에러 로그</HintText>
           )}
         </SoftCard>
       </Col>
@@ -445,7 +441,7 @@ function CauseRow({ data, fmt }) {
             </LineChart>
           </ChartBox>
           <HintText>
-            풀 고갈 때: RDS CPU도 오르면 DB(Discord 느린 쿼리 알림 확인), GC 정지가 튀면 앱 멈춤, 요청이 몰렸으면 트래픽
+            풀 고갈 때: RDS CPU도 오르면 DB(느린 쿼리 알림 확인), GC 정지가 튀면 앱 멈춤, 요청이 몰렸으면 트래픽
           </HintText>
         </SoftCard>
       </Col>
@@ -711,9 +707,6 @@ export default function Metrics() {
   return (
     <div>
       <PageTitle>서버 메트릭</PageTitle>
-      <SubText>
-        알림을 받고 열었을 때 서버 상태 탭을 위에서부터 읽으면 됩니다: 지금 상태 -> 사용자 영향(언제, 얼마나) -> 원인(서버 자원 / DB).
-      </SubText>
 
       <Row style={{ marginBottom: 8 }} align="middle" gutter={[12, 8]}>
         <Col>
