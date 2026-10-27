@@ -12,6 +12,11 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       proxy: {
+        // 서버리스 메트릭 함수는 vite가 못 띄운다 -> scripts/metrics-dev-server.mjs 로 띄우고
+        // 이 env를 줄 때만 그쪽으로 보낸다. ('/api' 보다 먼저 등록해야 먼저 매칭됨)
+        ...(env.VITE_METRICS_PROXY_TARGET && {
+          '/api/metrics': { target: env.VITE_METRICS_PROXY_TARGET, changeOrigin: true },
+        }),
         // beta 프로필은 baseURL 이 '/api-beta' → 배포의 vercel.json rewrite 와 동일하게
         // 로컬에서도 프록시 대상으로 전달한다. (더 구체적인 prefix 를 먼저 등록)
         '/api-beta': {

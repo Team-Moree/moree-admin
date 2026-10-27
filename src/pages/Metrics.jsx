@@ -1,21 +1,29 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Card, Row, Col, Statistic, Segmented, Button, Alert, Spin, Table, Typography, Tag } from 'antd';
+import { Card, Row, Col, Segmented, Button, Alert, Spin, Table, Typography, Tag, Tabs, Space, Input } from 'antd';
 import { ReloadOutlined, ExportOutlined } from '@ant-design/icons';
 import {
   ResponsiveContainer,
+  ComposedChart,
   LineChart,
   Line,
   AreaChart,
   Area,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
+  ReferenceLine,
+  Cell,
 } from 'recharts';
 import dayjs from 'dayjs';
+import relativeTime from 'dayjs/plugin/relativeTime';
+import 'dayjs/locale/ko';
 import styled from 'styled-components';
 import { fetchMetricsOverview } from '../api/metrics';
 import { buildMockMetrics } from './metricsMock'; // [MOCK] 롤백 시 이 줄 + 토글 제거
+
+dayjs.extend(relativeTime);
 
 const { Text } = Typography;
 
@@ -35,13 +43,14 @@ const SectionTitle = styled.h4`
 const HintText = styled.p`
   margin: 8px 0 0;
   font-size: 11.5px;
-  color: #bfbfbf;
+  color: #a6a6a6;
   line-height: 1.4;
 `;
 const SoftCard = styled(Card)`
   border-radius: 14px;
   border: 1px solid #f0f0f0;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.03);
+  height: 100%;
   .ant-card-head {
     border-bottom: 1px solid #f5f5f5;
     min-height: 48px;
@@ -50,70 +59,101 @@ const SoftCard = styled(Card)`
     font-weight: 600;
   }
 `;
+const CardLabel = styled.div`
+  font-size: 13px;
+  color: #8c8c8c;
+  margin-bottom: 4px;
+`;
+const BigValue = styled.div`
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: ${(p) => p.$color || '#1f1f1f'};
+  font-variant-numeric: tabular-nums;
+`;
+const ChartLabel = styled.div`
+  font-size: 12px;
+  color: #595959;
+  margin: 4px 0;
+`;
+// 차트 제목 옆 '정상 범위' 메모
+const Normal = styled.span`
+  margin-left: 6px;
+  font-size: 11px;
+  color: #a6a6a6;
+`;
+// 앱 상태 띠: 구간마다 한 칸. 초록=응답, 빨강=응답 없음, 회색=데이터 없음(수집기/호스트까지 멈춤)
+const UpBand = styled.div`
+  display: flex;
+  height: 14px;
+  margin-top: 10px;
+  border-radius: 3px;
+  overflow: hidden;
+`;
+const UpCell = styled.div`
+  flex: 1;
+  background: ${(p) => (p.$v === 1 ? '#52c41a' : p.$v === 0 ? '#cf1322' : '#d9d9d9')};
+`;
 
-const CAT = ['#2a78d6', '#008300', '#e87ba4', '#eda100', '#1baf7a', '#eb6834', '#7856ff'];
+// 시간 축은 최소 1초까지 보여준다. 자동 축이면 수 ms짜리 정상값도 큰 언덕처럼 보인다.
+const SECONDS_DOMAIN = [0, (max) => Math.max(max, 1)];
 
-// 지표별로 "정상/주의/위험" 기준이 다르다 — 하나의 공통 기준(예: 50%/80%)을 전부에 적용하면
-// 에러율처럼 훨씬 낮은 값에서 위험해지는 지표를 놓친다.
-const THRESHOLDS = {
-  error5xx: { warn: 1, crit: 5 }, // %
-  thread: { warn: 60, crit: 80 }, // %
-  hikari: { warn: 60, crit: 80 }, // %
-  heap: { warn: 70, crit: 85 }, // %
-};
-function statusFor(key, pct) {
-  const t = THRESHOLDS[key];
-  if (pct >= t.crit) return 'crit';
-  if (pct >= t.warn) return 'warn';
-  return 'ok';
-}
-function colorFor(status) {
-  if (status === 'crit') return '#cf1322';
-  if (status === 'warn') return '#d48806';
-  return '#1f1f1f';
-}
+const RED = '#cf1322';
+const ORANGE = '#d48806';
+const BLUE = '#2a78d6';
+const GREEN = '#008300';
+const PURPLE = '#7856ff';
+const GRAY = '#8c8c8c';
 
-// 카드마다 "지금 상태 + 다음에 뭘 봐야 하는지"를 짧게 알려주는 힌트
-const HINTS = {
-  error5xx: {
-    ok: `${THRESHOLDS.error5xx.warn}% 미만이면 대체로 정상`,
-    warn: '5xx 증가 중 — 최근 배포 여부, 에러 로그 확인',
-    crit: `${THRESHOLDS.error5xx.crit}% 이상 — 장애 가능성 높음, 영향받는 API부터 확인`,
+const RANGE_OPTIONS = [
+  { label: '1시간', value: 1 },
+  { label: '6시간', value: 6 },
+  { label: '24시간', value: 24 },
+  { label: '7일', value: 168 },
+];
+
+const LINKS = [
+  { label: 'Grafana', href: 'https://loftysummit1845.grafana.net/explore' },
+  {
+    label: 'EC2',
+    href: 'https://ap-northeast-2.console.aws.amazon.com/ec2/home?region=ap-northeast-2#InstanceDetails:instanceId=i-00e0809e4255b0490',
   },
-  thread: {
-    ok: `${THRESHOLDS.thread.warn}% 미만이면 대체로 여유 있음`,
-    warn: '올라가는 중 — 힙 사용률도 같이 확인 (스레드 늘리기 전에 메모리부터 체크)',
-    crit: '응답 지연 시작 구간 — 메모리 여유 확인 후 스레드 수 조정 검토',
+  {
+    label: 'RDS',
+    href: 'https://ap-northeast-2.console.aws.amazon.com/rds/home?region=ap-northeast-2#database:id=moree-rds-release;is-cluster=false',
   },
-  hikari: {
-    ok: `${THRESHOLDS.hikari.warn}% 미만이면 대체로 여유 있음`,
-    warn: 'DB 커넥션이 부족해지는 중 — pending 건수 주시',
-    crit: 'DB가 병목일 가능성 — pending 건수부터 확인',
+  {
+    label: '앱 로그',
+    href: 'https://ap-northeast-2.console.aws.amazon.com/cloudwatch/home?region=ap-northeast-2#logsV2:log-groups/log-group/moree-api',
   },
-  heap: {
-    ok: `${THRESHOLDS.heap.warn}% 미만이면 여유 있음`,
-    warn: '메모리 여유 줄어드는 중 — GC 오버헤드 차트와 같이 보기',
-    crit: 'GC가 잦아져 지연을 유발하고 있을 가능성',
-  },
-};
-function hintFor(key, pct) {
-  return HINTS[key][statusFor(key, pct)];
+];
+
+// 알림 링크(/metrics?end=<unix초>&range=<시간>)로 들어오면 그 시각을 끝으로 보여준다
+function readUrlParams() {
+  const q = new URLSearchParams(window.location.search);
+  const end = Number(q.get('end')) || null;
+  const range = Number(q.get('range'));
+  return { end, rangeHours: RANGE_OPTIONS.some((o) => o.value === range) ? range : 1 };
 }
 
-// [[ts, value], ...] → recharts용 [{ time, [key]: value }, ...]
-function toSeries(points, key) {
-  return (points || []).map(([t, v]) => ({ time: dayjs(t * 1000).format('HH:mm'), [key]: v }));
+// 24시간을 넘는 범위(7일)는 시:분만으로는 날짜를 구분할 수 없다
+function timeFormat(rangeHours) {
+  return rangeHours > 24 ? 'MM/DD HH:mm' : 'HH:mm';
 }
 
-// [{ uri, points: [[ts, value], ...] }, ...] → 같은 time축을 공유하는 [{ time, [uri1]: v, [uri2]: v, ... }]
-// 트래픽 없는 구간은 Prometheus가 그 uri의 포인트 자체를 안 돌려주기 때문에 uri마다 배열 길이가
-// 다르다 -> 인덱스로 합치면 안 되고 실제 타임스탬프로 합쳐야 한다.
-function mergeByUri(seriesList) {
+// 여러 시리즈를 같은 time축의 행으로 합친다. 값이 없는 구간은 Prometheus가 포인트 자체를
+// 안 돌려줘서 시리즈마다 배열 길이가 다르다 -> 인덱스가 아니라 실제 타임스탬프로 합친다.
+// timestamps를 주면 그 축 전체를 깔아 둔다(데이터가 없는 구간도 빈칸으로 보이게).
+function mergeSeries(seriesByKey, fmt, timestamps = []) {
   const rowsByTime = new Map();
-  seriesList.forEach((s) => {
-    s.points.forEach(([t, v]) => {
-      if (!rowsByTime.has(t)) rowsByTime.set(t, { time: dayjs(t * 1000).format('HH:mm') });
-      rowsByTime.get(t)[s.uri] = v;
+  const row = (t) => {
+    if (!rowsByTime.has(t)) rowsByTime.set(t, { time: dayjs(t * 1000).format(fmt) });
+    return rowsByTime.get(t);
+  };
+  timestamps.forEach(row);
+  Object.entries(seriesByKey).forEach(([key, points]) => {
+    (points || []).forEach(([t, v]) => {
+      row(t)[key] = v;
     });
   });
   return Array.from(rowsByTime.keys())
@@ -121,71 +161,566 @@ function mergeByUri(seriesList) {
     .map((t) => rowsByTime.get(t));
 }
 
+function rangeTimestamps(range) {
+  const out = [];
+  for (let t = range.start + range.step; t <= range.end; t += range.step) out.push(t);
+  return out;
+}
+
+function formatSeconds(v) {
+  if (v == null) return '-';
+  if (v < 1) return `${Math.round(v * 1000)}ms`;
+  return `${v.toFixed(1)}s`;
+}
+const count = (v) => Math.round(v ?? 0).toLocaleString();
+
+function ChartBox({ height = 160, children }) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      {children}
+    </ResponsiveContainer>
+  );
+}
+const axis = { fontSize: 11 };
+const grid = <CartesianGrid strokeDasharray="3 3" stroke="#eef0f2" />;
+
+// 1행: 지금
+function NowRow({ data }) {
+  const ts = rangeTimestamps(data.range);
+  const upByTime = new Map(data.upSeries.map(([t, v]) => [t, v]));
+  const downCount = data.upSeries.filter(([, v]) => v === 0).length;
+  const appState =
+    data.upNow === 1
+      ? { text: '응답 중', color: GREEN }
+      : data.upNow === 0
+        ? { text: '응답 없음', color: RED }
+        : { text: '데이터 없음', color: RED };
+  const restartedAgo = data.startTime ? dayjs(data.startTime * 1000) : null;
+  const recentRestart = restartedAgo && data.range.end - data.startTime < 3600;
+  const requestChange =
+    data.requestsPrev > 0 ? Math.round(((data.requests - data.requestsPrev) / data.requestsPrev) * 100) : null;
+
+  return (
+    <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+      <Col xs={24} sm={12} lg={6}>
+        <SoftCard>
+          <CardLabel>앱 상태 (지금)</CardLabel>
+          <BigValue $color={appState.color}>{appState.text}</BigValue>
+          <UpBand title="구간별 앱 응답 여부">
+            {ts.map((t) => (
+              <UpCell key={t} $v={upByTime.get(t)} />
+            ))}
+          </UpBand>
+          <HintText>
+            {downCount > 0
+              ? `선택 기간 중 응답 못 한 구간 ${downCount}개 - 같은 시각 GC 정지/풀 차트 확인`
+              : '선택 기간 내내 응답함. 빨강=그 구간에 응답 못 한 적 있음, 회색=수집 자체가 끊김'}
+          </HintText>
+          <Text type="secondary" style={{ fontSize: 12, color: recentRestart ? ORANGE : undefined }}>
+            마지막 재시작{' '}
+            {restartedAgo
+              ? `${restartedAgo.locale('ko').from(dayjs(data.range.end * 1000))} (${restartedAgo.format('MM/DD HH:mm')})`
+              : '-'}
+            {recentRestart && ' - 배포한 적 없으면 앱이 죽었다 다시 뜬 것'}
+          </Text>
+        </SoftCard>
+      </Col>
+      <Col xs={24} sm={12} lg={6}>
+        <SoftCard>
+          <CardLabel>요청 (헬스체크 제외)</CardLabel>
+          <BigValue>{count(data.requests)}건</BigValue>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {requestChange == null
+              ? '직전 같은 기간 데이터 없음'
+              : `직전 같은 기간 ${count(data.requestsPrev)}건 대비 ${requestChange >= 0 ? '+' : ''}${requestChange}%`}
+          </Text>
+          <HintText>직전 기간보다 크게 늘었으면 트래픽 원인 - 아래 트래픽 차트에서 몰린 시각 확인</HintText>
+        </SoftCard>
+      </Col>
+      <Col xs={24} sm={12} lg={6}>
+        <SoftCard>
+          <CardLabel>응답시간 (업로드 제외)</CardLabel>
+          <Space size={24}>
+            <BigValue $color={data.latencyMax >= 3 ? ORANGE : undefined}>
+              {formatSeconds(data.latencyMax)}
+              <Text type="secondary" style={{ fontSize: 13, marginLeft: 4 }}>최대</Text>
+            </BigValue>
+            <BigValue>
+              {formatSeconds(data.latencyAvg)}
+              <Text type="secondary" style={{ fontSize: 13, marginLeft: 4 }}>평균</Text>
+            </BigValue>
+          </Space>
+          <HintText>평균은 괜찮은데 최대만 크면 일부 요청만 느렸던 것 - 아래 최대 응답시간 선에서 시각 확인</HintText>
+        </SoftCard>
+      </Col>
+      <Col xs={24} sm={12} lg={6}>
+        <SoftCard>
+          <CardLabel>실패</CardLabel>
+          <Space size={24}>
+            <BigValue $color={data.error5xx >= 0.5 ? RED : undefined}>
+              {count(data.error5xx)}
+              <Text type="secondary" style={{ fontSize: 13, marginLeft: 4 }}>5xx</Text>
+            </BigValue>
+            <BigValue $color={data.errorLogs >= 0.5 ? RED : undefined}>
+              {count(data.errorLogs)}
+              <Text type="secondary" style={{ fontSize: 13, marginLeft: 4 }}>ERROR</Text>
+            </BigValue>
+          </Space>
+          {data.error5xxTopUris.length > 0 ? (
+            <div style={{ marginTop: 8, fontSize: 12 }}>
+              {data.error5xxTopUris.map((e) => (
+                <div key={e.uri} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <Text ellipsis style={{ fontSize: 12 }}>
+                    {e.uri}
+                  </Text>
+                  <Text style={{ fontSize: 12, color: RED, whiteSpace: 'nowrap' }}>{count(e.count)}건</Text>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <HintText>ERROR는 Discord 알림과 같은 출처. 여기엔 있는데 Discord가 조용하면 알림 경로 고장</HintText>
+          )}
+        </SoftCard>
+      </Col>
+    </Row>
+  );
+}
+
+// 3행: 원인 1(서버 자원), 2(DB/풀)
+function CauseRow({ data, fmt }) {
+  const ts = rangeTimestamps(data.range);
+  const jvm = mergeSeries(
+    {
+      gc: data.gcPauseSeries,
+      liveSet: data.liveSetSeries,
+      process: data.processCpuSeries,
+      system: data.systemCpuSeries,
+      hostMem: data.hostMem,
+      hostSwap: data.hostSwap,
+    },
+    fmt,
+    ts
+  );
+  const pool = mergeSeries(
+    {
+      active: data.poolActiveSeries,
+      pending: data.poolPendingSeries,
+      timeouts: data.poolTimeoutSeries,
+      acquire: data.poolAcquireSeries,
+      rdsCpu: data.rdsCpu,
+    },
+    fmt,
+    ts
+  );
+  const gcColor = data.gcPauseMax >= 5 ? RED : data.gcPauseMax >= 1 ? ORANGE : undefined;
+  const lastValue = (points) => points?.at(-1)?.[1];
+  const rdsConnections = lastValue(data.rdsConnections);
+  const rdsFreeMb = lastValue(data.rdsFreeMemory) / 1024 / 1024;
+  const cloudwatchNote = data.cloudwatchError && (
+    <Text type="secondary" style={{ fontSize: 11 }}>
+      ({data.cloudwatchError})
+    </Text>
+  );
+
+  return (
+    <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+      <Col xs={24} lg={12}>
+        <SoftCard
+          title="원인 1: 서버 자원 (CPU / 메모리)"
+          extra={<Text style={{ color: gcColor }}>최장 GC 정지 {formatSeconds(data.gcPauseMax)}</Text>}
+        >
+          <ChartLabel>
+            CPU % (<span style={{ color: BLUE }}>앱</span> / <span style={{ color: GRAY }}>서버 전체</span>)
+            <Normal>평소 5% 이하, 80% 넘게 유지되면 이상</Normal>
+          </ChartLabel>
+          <ChartBox height={90}>
+            <LineChart data={jvm}>
+              {grid}
+              <XAxis dataKey="time" {...axis} minTickGap={24} />
+              <YAxis {...axis} width={48} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+              <Tooltip formatter={(v, name) => [`${v.toFixed(1)}%`, name]} />
+              <Line type="monotone" dataKey="process" name="앱" stroke={BLUE} dot={false} />
+              <Line type="monotone" dataKey="system" name="서버" stroke={GRAY} dot={false} />
+            </LineChart>
+          </ChartBox>
+          <ChartLabel>
+            서버 메모리 % (<span style={{ color: PURPLE }}>사용</span> / <span style={{ color: RED }}>swap</span>, EC2)
+            <Normal>swap이 평소보다 오르면 메모리 부족</Normal> {cloudwatchNote}
+          </ChartLabel>
+          <ChartBox height={90}>
+            <LineChart data={jvm}>
+              {grid}
+              <XAxis dataKey="time" {...axis} minTickGap={24} />
+              <YAxis {...axis} width={48} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+              <Tooltip formatter={(v, name) => [`${v.toFixed(1)}%`, name]} />
+              <Line type="monotone" dataKey="hostMem" name="메모리 사용" stroke={PURPLE} dot={false} connectNulls />
+              <Line type="monotone" dataKey="hostSwap" name="swap 사용" stroke={RED} dot={false} connectNulls />
+            </LineChart>
+          </ChartBox>
+          <ChartLabel>
+            GC 정지 시간 (정지 동안 모든 요청이 멈춤)<Normal>평소 수 ms, 1초 넘으면 사용자가 느낌</Normal>
+          </ChartLabel>
+          <ChartBox height={90}>
+            <AreaChart data={jvm}>
+              {grid}
+              <XAxis dataKey="time" {...axis} minTickGap={24} />
+              <YAxis {...axis} width={48} domain={SECONDS_DOMAIN} tickFormatter={formatSeconds} />
+              <Tooltip formatter={(v) => [formatSeconds(v), 'GC 정지']} />
+              <ReferenceLine y={1} stroke={ORANGE} strokeDasharray="4 4" />
+              <Area type="monotone" dataKey="gc" stroke={ORANGE} fill={`${ORANGE}22`} />
+            </AreaChart>
+          </ChartBox>
+          <ChartLabel>
+            힙 live set % (GC 후에도 남는 앱 메모리)<Normal>85% 넘으면 GC가 잦고 길어짐</Normal>
+          </ChartLabel>
+          <ChartBox height={90}>
+            <LineChart data={jvm}>
+              {grid}
+              <XAxis dataKey="time" {...axis} minTickGap={24} />
+              <YAxis {...axis} width={48} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+              <Tooltip formatter={(v) => [`${v.toFixed(1)}%`, 'live set']} />
+              <ReferenceLine y={85} stroke={RED} strokeDasharray="4 4" />
+              <Line type="monotone" dataKey="liveSet" stroke={GREEN} dot={false} />
+            </LineChart>
+          </ChartBox>
+          <HintText>
+            CPU와 GC 정지가 같이 튀면 메모리 문제, CPU만 높으면 요청 몰림(위 사용자 영향)이나 무거운 API(API 성능 탭)
+          </HintText>
+        </SoftCard>
+      </Col>
+      <Col xs={24} lg={12}>
+        <SoftCard
+          title="원인 2: DB / 커넥션 풀"
+          extra={
+            <Text style={{ color: data.poolTimeouts >= 0.5 ? RED : undefined }}>
+              획득 실패 {count(data.poolTimeouts)}건
+            </Text>
+          }
+        >
+          <ChartLabel>
+            커넥션 풀 (<span style={{ color: BLUE }}>쿼리 실행 중</span> /{' '}
+            <span style={{ color: RED }}>커넥션 기다리는 요청</span>, 총 {data.poolMax ?? '-'}개)
+            <Normal>1분마다 측정이라 대부분 0, 빨간 막대가 보이면 풀 고갈</Normal>
+          </ChartLabel>
+          <ChartBox height={100}>
+            {/* 기다리는 요청은 0이면 아무것도 안 그린다(선으로 그리면 0인데도 바닥에 빨간 선이 깔려 고갈처럼 보임) */}
+            <ComposedChart data={pool.map((r) => ({ ...r, pending: r.pending > 0 ? r.pending : null }))}>
+              {grid}
+              <XAxis dataKey="time" {...axis} minTickGap={24} />
+              <YAxis {...axis} width={48} allowDecimals={false} domain={[0, data.poolMax || 'auto']} />
+              <Tooltip formatter={(v, name) => [`${Math.round(v)}개`, name]} />
+              <Bar dataKey="pending" name="커넥션 기다리는 요청" fill={RED} />
+              <Line type="stepAfter" dataKey="active" name="쿼리 실행 중" stroke={BLUE} dot={false} />
+            </ComposedChart>
+          </ChartBox>
+          <ChartLabel>
+            <span style={{ color: RED }}>획득 실패 건수</span> / <span style={{ color: PURPLE }}>획득 대기 시간</span>
+            <Normal>평소 실패 0, 대기 수 ms</Normal>
+          </ChartLabel>
+          <ChartBox height={100}>
+            <ComposedChart data={pool}>
+              {grid}
+              <XAxis dataKey="time" {...axis} minTickGap={24} />
+              <YAxis yAxisId="n" {...axis} width={48} allowDecimals={false} />
+              <YAxis yAxisId="s" orientation="right" {...axis} width={48} domain={SECONDS_DOMAIN} tickFormatter={formatSeconds} />
+              <Tooltip
+                formatter={(v, name) => (name === '획득 실패' ? [`${Math.round(v)}건`, name] : [formatSeconds(v), name])}
+              />
+              <Bar yAxisId="n" dataKey="timeouts" name="획득 실패" fill={RED} />
+              <Line yAxisId="s" type="monotone" dataKey="acquire" name="획득 대기" stroke={PURPLE} dot={false} />
+            </ComposedChart>
+          </ChartBox>
+          <ChartLabel>
+            RDS CPU % - 지금 연결 {rdsConnections == null ? '-' : `${Math.round(rdsConnections)}개`}, 여유 메모리{' '}
+            {Number.isFinite(rdsFreeMb) ? `${Math.round(rdsFreeMb)}MB` : '-'}
+            <Normal>평소 5% 안팎, 연결 10~13개</Normal> {cloudwatchNote}
+          </ChartLabel>
+          <ChartBox height={100}>
+            <LineChart data={pool}>
+              {grid}
+              <XAxis dataKey="time" {...axis} minTickGap={24} />
+              <YAxis {...axis} width={48} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+              <Tooltip formatter={(v) => [`${v.toFixed(1)}%`, 'RDS CPU']} />
+              <Line type="monotone" dataKey="rdsCpu" name="RDS CPU" stroke={ORANGE} dot={false} connectNulls />
+            </LineChart>
+          </ChartBox>
+          <HintText>
+            풀 고갈 때: RDS CPU도 오르면 DB(Discord 느린 쿼리 알림 확인), GC 정지가 튀면 앱 멈춤, 요청이 몰렸으면 트래픽
+          </HintText>
+        </SoftCard>
+      </Col>
+    </Row>
+  );
+}
+
+// 2행: 사용자 영향(요청 / 에러 / 응답시간). RED(Rate, Errors, Duration) 순서로 같은 시간축에 쌓는다.
+function TrafficRow({ data, fmt }) {
+  // 앱의 최대 응답시간 값은 요청이 끝난 뒤에도 약 2분 남아 있어서, 요청이 없는 다음 구간에도
+  // 직전 값이 찍힌다 -> 그 구간에 요청이 있었을 때만 보여준다.
+  // 5xx는 요청의 일부라 "정상 + 5xx"로 쌓아 막대 전체 높이 = 요청 수가 되게 한다.
+  const rows = mergeSeries(
+    { requests: data.requestSeries, errors: data.error5xxSeries, latency: data.latencyMaxSeries },
+    fmt,
+    rangeTimestamps(data.range)
+  ).map((r) => ({
+    ...r,
+    ok: Math.max(0, (r.requests ?? 0) - (r.errors ?? 0)),
+    latency: r.requests >= 0.5 ? r.latency : null,
+  }));
+  // 툴팁은 각 차트 자기 값만. (스택 막대라 기본 툴팁은 "정상"을 보여주므로 요청 합계로 직접 그린다)
+  const tooltipBox = (label, lines) => (
+    <div style={{ background: '#fff', border: '1px solid #f0f0f0', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
+      <div style={{ color: GRAY, marginBottom: 4 }}>{label}</div>
+      {lines}
+    </div>
+  );
+  const requestTooltip = (
+    <Tooltip
+      content={({ active, payload, label }) => {
+        if (!active || !payload?.length) return null;
+        const r = payload[0].payload;
+        return tooltipBox(label, [
+          <div key="req" style={{ color: BLUE }}>요청 {count(r.requests)}건</div>,
+          <div key="err" style={{ color: RED }}>5xx {count(r.errors)}건</div>,
+        ]);
+      }}
+    />
+  );
+  const latencyTooltip = (
+    <Tooltip
+      content={({ active, payload, label }) => {
+        if (!active || !payload?.length) return null;
+        const v = payload[0].payload.latency;
+        return tooltipBox(label, (
+          <div style={{ color: ORANGE }}>최대 응답시간 {v == null ? '- (요청 없음)' : formatSeconds(v)}</div>
+        ));
+      }}
+    />
+  );
+  return (
+    <SoftCard title="요청 / 에러 / 응답시간" style={{ marginBottom: 24 }}>
+      <ChartLabel>
+        구간별 <span style={{ color: BLUE }}>요청</span> / <span style={{ color: RED }}>5xx</span> 건수
+      </ChartLabel>
+      <ChartBox height={140}>
+        {/* 두 차트는 같은 rows라 순서가 곧 시각 -> syncId로 한쪽에 마우스를 올리면 다른 쪽도 같은 시각을 가리킨다 */}
+        <ComposedChart data={rows} syncId="traffic">
+          {grid}
+          <XAxis dataKey="time" {...axis} minTickGap={24} />
+          <YAxis {...axis} width={52} allowDecimals={false} />
+          {requestTooltip}
+          <Bar dataKey="ok" stackId="req" name="정상" fill={`${BLUE}99`} />
+          <Bar dataKey="errors" stackId="req" name="5xx" fill={RED} />
+        </ComposedChart>
+      </ChartBox>
+      <ChartLabel>
+        구간별 최대 응답시간 (업로드 제외, 요청이 있던 구간만) - <span style={{ color: RED }}>1초 넘으면 빨강</span>
+      </ChartLabel>
+      <ChartBox height={100}>
+        <ComposedChart data={rows} syncId="traffic">
+          {grid}
+          <XAxis dataKey="time" {...axis} minTickGap={24} />
+          <YAxis {...axis} width={52} domain={SECONDS_DOMAIN} tickFormatter={formatSeconds} />
+          {latencyTooltip}
+          {/* 큰 값 하나가 축을 키우면 1초 기준선이 바닥에 붙어 안 보여서, 기준선 대신 막대 색으로 구분한다 */}
+          <Bar dataKey="latency" name="최대 응답시간">
+            {rows.map((r) => (
+              <Cell key={r.time} fill={r.latency >= 1 ? RED : ORANGE} />
+            ))}
+          </Bar>
+        </ComposedChart>
+      </ChartBox>
+      <HintText>
+        두 차트의 시간축이 같습니다. 빨간 막대(1초 초과)만 보면 됩니다. 그 시각에 요청도 몰렸으면 트래픽, 아니면 같은 시각
+        GC 정지/DB 차트 확인
+      </HintText>
+    </SoftCard>
+  );
+}
+
+// API 성능 탭 (탭을 열 때 조회). "늘 느린 API = 개선 대상"을 찾는 용도라 평균 응답시간 순이 기본.
+const AVG_WARN = 0.3; // 초
+const AVG_CRIT = 1;
+const MAX_WARN = 3;
+const METHOD_COLOR = { GET: 'blue', POST: 'green', PUT: 'orange', PATCH: 'gold', DELETE: 'red' };
+const API_SCOPES = [
+  { label: '전체', value: 'all' },
+  { label: '앱', value: 'app' },
+  { label: '어드민', value: 'admin' },
+];
+
+function avgColor(v) {
+  if (v >= AVG_CRIT) return RED;
+  if (v >= AVG_WARN) return ORANGE;
+  return BLUE;
+}
+
+const AvgBar = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
+`;
+const AvgTrack = styled.div`
+  width: 90px;
+  height: 6px;
+  border-radius: 3px;
+  background: #f0f0f0;
+  overflow: hidden;
+`;
+
+function ApiPanel({ detail }) {
+  const [query, setQuery] = useState('');
+  const [scope, setScope] = useState('all');
+  const rows = detail.endpoints.filter((e) => {
+    if (scope === 'admin' && !e.uri.startsWith('/admin')) return false;
+    if (scope === 'app' && e.uri.startsWith('/admin')) return false;
+    return !query || e.uri.toLowerCase().includes(query.toLowerCase());
+  });
+  const maxAvg = Math.max(...rows.map((e) => e.avgSeconds), 0.001);
+  const slowCount = rows.filter((e) => e.avgSeconds >= AVG_WARN).length;
+  const errorCount = rows.filter((e) => e.errors5xx >= 0.5).length;
+
+  return (
+    <>
+      <Row gutter={[12, 8]} align="middle" style={{ marginBottom: 12 }}>
+        <Col>
+          <Input.Search
+            allowClear
+            placeholder="경로 검색 (예: store)"
+            onChange={(e) => setQuery(e.target.value)}
+            style={{ width: 240 }}
+          />
+        </Col>
+        <Col>
+          <Segmented value={scope} onChange={setScope} options={API_SCOPES} />
+        </Col>
+        <Col flex="auto" />
+        <Col>
+          <Space size={8}>
+            <Tag color={slowCount > 0 ? 'orange' : 'default'}>평균 300ms 넘는 API {slowCount}개</Tag>
+            <Tag color={errorCount > 0 ? 'red' : 'default'}>5xx 난 API {errorCount}개</Tag>
+          </Space>
+        </Col>
+      </Row>
+      <Table
+        rowKey="key"
+        dataSource={rows}
+        pagination={{ pageSize: 20, hideOnSinglePage: true }}
+        scroll={{ x: 720 }}
+        columns={[
+          {
+            title: 'API',
+            dataIndex: 'uri',
+            render: (uri, e) => (
+              <Space size={6}>
+                <Tag color={METHOD_COLOR[e.method]} style={{ width: 56, textAlign: 'center', marginRight: 0 }}>
+                  {e.method}
+                </Tag>
+                <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13 }}>
+                  {uri}
+                </span>
+              </Space>
+            ),
+          },
+          {
+            title: '평균',
+            dataIndex: 'avgSeconds',
+            width: 190,
+            align: 'right',
+            defaultSortOrder: 'descend',
+            sorter: (a, b) => a.avgSeconds - b.avgSeconds,
+            render: (v) => (
+              <AvgBar>
+                <AvgTrack>
+                  <div style={{ width: `${(v / maxAvg) * 100}%`, height: '100%', background: avgColor(v) }} />
+                </AvgTrack>
+                <span style={{ width: 56, color: v >= AVG_WARN ? avgColor(v) : undefined }}>{formatSeconds(v)}</span>
+              </AvgBar>
+            ),
+          },
+          {
+            title: '최대',
+            dataIndex: 'maxSeconds',
+            width: 100,
+            align: 'right',
+            sorter: (a, b) => a.maxSeconds - b.maxSeconds,
+            render: (v) => <span style={{ color: v >= MAX_WARN ? ORANGE : undefined }}>{formatSeconds(v)}</span>,
+          },
+          {
+            title: '요청',
+            dataIndex: 'requests',
+            width: 90,
+            align: 'right',
+            sorter: (a, b) => a.requests - b.requests,
+            render: count,
+          },
+          {
+            title: '5xx',
+            dataIndex: 'errors5xx',
+            width: 70,
+            align: 'right',
+            sorter: (a, b) => a.errors5xx - b.errors5xx,
+            render: (v) => (v >= 0.5 ? <Text style={{ color: RED, fontWeight: 600 }}>{count(v)}</Text> : <Text type="secondary">-</Text>),
+          },
+        ]}
+      />
+      <HintText>
+        선택 기간 집계. 평균이 높으면 늘 느린 API(개선 대상), 최대만 높으면 가끔 느렸던 것(그 시각 서버 상태 탭 확인).
+        색 기준: 평균 300ms 주황, 1초 빨강 / 최대 3초 주황
+      </HintText>
+    </>
+  );
+}
+
+// 탭마다 필요한 응답(view)만 조회한다
+const TAB_VIEW = { status: 'overview', api: 'detail' };
+
 export default function Metrics() {
-  const [rangeHours, setRangeHours] = useState(6);
+  const initial = readUrlParams();
+  const [tab, setTab] = useState('status');
+  const [rangeHours, setRangeHours] = useState(initial.rangeHours);
+  const [end, setEnd] = useState(initial.end);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [mock, setMock] = useState(false); // [MOCK] 데모 데이터 토글
-  const [highlightedUri, setHighlightedUri] = useState(null);
+  const view = TAB_VIEW[tab];
 
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
-    fetchMetricsOverview({ rangeHours })
+    (mock
+      ? Promise.resolve(buildMockMetrics(rangeHours, view))
+      : fetchMetricsOverview({ rangeHours, view, end: end ?? undefined })
+    )
       .then(setData)
       .catch((err) => setError(err?.response?.data?.message || err.message))
       .finally(() => setLoading(false));
-  }, [rangeHours]);
-
-  // [MOCK] 실데이터/목업 분기. 롤백 시 refresh 를 load 직접호출로 되돌리면 됨.
-  const refresh = useCallback(
-    (useMock) => {
-      if (useMock) {
-        setError(null);
-        setLoading(false);
-        setData(buildMockMetrics(rangeHours));
-      } else {
-        load();
-      }
-    },
-    [load, rangeHours]
-  );
+  }, [mock, rangeHours, view, end]);
 
   useEffect(() => {
-    refresh(mock);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rangeHours]);
+    load();
+  }, [load]);
 
-  const p95Chart = data ? mergeByUri(data.p95ByEndpoint || []) : [];
-  const uris = data ? (data.p95ByEndpoint || []).map((s) => s.uri) : [];
-
-  const threadChart = data ? toSeries(data.threadPoolUsageSeries, 'usagePct') : [];
-  const hikariChart = data ? toSeries(data.hikariUsageSeries, 'usagePct') : [];
-  const heapChart = data ? toSeries(data.heapUsageSeries, 'usagePct') : [];
-  const gcChart = data ? toSeries(data.gcOverheadSeries, 'overhead') : [];
+  const fmt = timeFormat(rangeHours);
+  // 탭 전환 직후엔 이전 탭 응답이 남아 있어 스키마가 다르다 -> 현재 탭 응답일 때만 그린다
+  const current = data?.view === view ? data : null;
 
   return (
     <div>
       <PageTitle>서버 메트릭</PageTitle>
       <SubText>
-        Grafana Cloud(Prometheus) 기반 지표. moree-api Alloy가 스크레이프해 전송한 데이터를 조회합니다.
+        알림을 받고 열었을 때 서버 상태 탭을 위에서부터 읽으면 됩니다: 지금 상태 -> 사용자 영향(언제, 얼마나) -> 원인(서버 자원 / DB).
       </SubText>
 
-      <Row style={{ marginBottom: 16 }} align="middle" gutter={[12, 8]}>
+      <Row style={{ marginBottom: 8 }} align="middle" gutter={[12, 8]}>
         <Col>
-          <Segmented
-            value={rangeHours}
-            onChange={setRangeHours}
-            options={[
-              { label: '1시간', value: 1 },
-              { label: '6시간', value: 6 },
-              { label: '24시간', value: 24 },
-            ]}
-          />
+          <Segmented value={rangeHours} onChange={setRangeHours} options={RANGE_OPTIONS} />
         </Col>
         <Col>
-          <Button icon={<ReloadOutlined />} onClick={() => refresh(mock)} loading={loading}>
+          <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
             조회
           </Button>
         </Col>
@@ -193,11 +728,7 @@ export default function Metrics() {
           {/* [MOCK] 데모 토글 */}
           <Segmented
             value={mock ? 'mock' : 'real'}
-            onChange={(v) => {
-              const m = v === 'mock';
-              setMock(m);
-              refresh(m);
-            }}
+            onChange={(v) => setMock(v === 'mock')}
             options={[
               { label: '실데이터', value: 'real' },
               { label: '목업', value: 'mock' },
@@ -209,270 +740,53 @@ export default function Metrics() {
             <Tag color="orange">목업 데이터</Tag>
           </Col>
         )}
+        {end && (
+          <Col>
+            <Tag color="blue" closable onClose={() => setEnd(null)}>
+              {dayjs(end * 1000).format('MM/DD HH:mm')} 기준
+            </Tag>
+          </Col>
+        )}
         <Col flex="auto" />
         <Col>
-          <Button
-            type="link"
-            icon={<ExportOutlined />}
-            href="https://loftysummit1845.grafana.net/explore"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Grafana에서 자세히 보기
-          </Button>
+          <Space size={0} wrap>
+            {LINKS.map((l) => (
+              <Button key={l.label} type="link" size="small" icon={<ExportOutlined />} href={l.href} target="_blank" rel="noreferrer">
+                {l.label}
+              </Button>
+            ))}
+          </Space>
         </Col>
       </Row>
+
+      <Tabs
+        activeKey={tab}
+        onChange={setTab}
+        items={[
+          { key: 'status', label: '서버 상태' },
+          { key: 'api', label: 'API 성능' },
+        ]}
+      />
 
       {error && (
         <Alert style={{ marginBottom: 16 }} type="error" showIcon message="메트릭 조회 실패" description={error} />
       )}
 
-      {loading && !data ? (
-        <Spin />
+      {!current ? (
+        loading && <Spin />
+      ) : tab === 'status' ? (
+        <>
+          <SectionTitle>지금</SectionTitle>
+          <NowRow data={current} />
+          <SectionTitle>사용자 영향 (언제, 얼마나)</SectionTitle>
+          <TrafficRow data={current} fmt={fmt} />
+          <SectionTitle>원인 (왜)</SectionTitle>
+          <CauseRow data={current} fmt={fmt} />
+        </>
       ) : (
-        data && (
-          <>
-            {/* 1. 증상 — 지금 문제가 있는가? */}
-            <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-              <Col xs={24} sm={12} lg={6}>
-                <SoftCard>
-                  <Statistic
-                    title="5xx 에러율"
-                    value={data.error5xxPercent}
-                    precision={1}
-                    suffix="%"
-                    valueStyle={{ color: colorFor(statusFor('error5xx', data.error5xxPercent)) }}
-                  />
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    4xx {data.error4xxPercent.toFixed(1)}% (참고용)
-                  </Text>
-                  <HintText>{hintFor('error5xx', data.error5xxPercent)}</HintText>
-                </SoftCard>
-              </Col>
-              <Col xs={24} sm={12} lg={6}>
-                <SoftCard>
-                  <Statistic
-                    title="가장 느린 응답 (p95)"
-                    value={Math.round(data.worstP95Seconds * 1000)}
-                    suffix="ms"
-                  />
-                  <HintText>선택한 기간 중 가장 느렸던 엔드포인트의 p95 — 아래 Top 10 표에서 어떤 API인지 확인</HintText>
-                </SoftCard>
-              </Col>
-              <Col xs={24} sm={12} lg={6}>
-                <SoftCard>
-                  <Statistic
-                    title="DB 대기 중인 요청"
-                    value={data.hikariPending}
-                    suffix="건"
-                    valueStyle={{ color: data.hikariPending > 0 ? '#cf1322' : '#1f1f1f' }}
-                  />
-                  <HintText>
-                    {data.hikariPending > 0
-                      ? '커넥션풀이 꽉 찼다는 뜻 — DB 병목 가능성, 느린 쿼리부터 확인'
-                      : '0이면 DB 커넥션 대기 없음 (정상)'}
-                  </HintText>
-                </SoftCard>
-              </Col>
-              <Col xs={24} sm={12} lg={6}>
-                <SoftCard>
-                  <Statistic
-                    title="JVM 힙 사용률"
-                    value={data.heapUsagePercent}
-                    precision={1}
-                    suffix="%"
-                    valueStyle={{ color: colorFor(statusFor('heap', data.heapUsagePercent)) }}
-                  />
-                  <HintText>{hintFor('heap', data.heapUsagePercent)}</HintText>
-                </SoftCard>
-              </Col>
-            </Row>
-
-            {/* 2. 문제 API — 어디가 느린가? */}
-            <SectionTitle>문제 API</SectionTitle>
-            <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-              <Col xs={24} lg={10}>
-                <SoftCard title="느린 엔드포인트 Top 10 (p95)" style={{ height: '100%' }}>
-                  <Table
-                    size="small"
-                    pagination={false}
-                    dataSource={data.slowestEndpoints}
-                    rowKey="uri"
-                    onRow={(record) => ({
-                      onClick: () =>
-                        setHighlightedUri((prev) => (prev === record.uri ? null : record.uri)),
-                      style: { cursor: 'pointer' },
-                    })}
-                    rowClassName={(record) => (highlightedUri === record.uri ? 'ant-table-row-selected' : '')}
-                    columns={[
-                      { title: '엔드포인트', dataIndex: 'uri' },
-                      {
-                        title: 'p95',
-                        dataIndex: 'p95Seconds',
-                        width: 90,
-                        render: (v) => `${Math.round(v * 1000)}ms`,
-                      },
-                    ]}
-                  />
-                  <HintText>행을 클릭하면 오른쪽 그래프에서 해당 API만 강조됩니다.</HintText>
-                </SoftCard>
-              </Col>
-              <Col xs={24} lg={14}>
-                <SoftCard title="엔드포인트별 p95 응답시간 추이" style={{ height: '100%' }}>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={p95Chart}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#eef0f2" />
-                      <XAxis dataKey="time" fontSize={12} />
-                      <YAxis
-                        fontSize={12}
-                        width={60}
-                        tickFormatter={(v) => `${Math.round(v * 1000)}ms`}
-                        domain={[0, 'auto']}
-                        tickCount={7}
-                      />
-                      <Tooltip
-                        content={({ active, payload, label }) => {
-                          if (!active || !payload?.length) return null;
-                          const rows = highlightedUri
-                            ? payload.filter((p) => p.dataKey === highlightedUri)
-                            : payload;
-                          return (
-                            <div
-                              style={{
-                                background: '#fff',
-                                border: '1px solid #f0f0f0',
-                                borderRadius: 8,
-                                padding: '8px 12px',
-                                fontSize: 12,
-                                boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-                              }}
-                            >
-                              <div style={{ color: '#8c8c8c', marginBottom: 4 }}>{label}</div>
-                              {rows.map((r) => (
-                                <div key={r.dataKey} style={{ color: r.color }}>
-                                  {r.dataKey}: {Math.round(r.value * 1000)}ms
-                                </div>
-                              ))}
-                            </div>
-                          );
-                        }}
-                      />
-                      {uris.flatMap((uri, i) => [
-                        // 실제 보이는 선(2px)은 클릭하기엔 너무 얇아서, 투명한 굵은 선을 겹쳐
-                        // 클릭 히트 영역만 넓힌다 (화면엔 안 보임)
-                        <Line
-                          key={`${uri}-hit`}
-                          type="monotone"
-                          dataKey={uri}
-                          stroke="transparent"
-                          strokeWidth={16}
-                          dot={false}
-                          activeDot={false}
-                          isAnimationActive={false}
-                          legendType="none"
-                          onClick={() => setHighlightedUri((prev) => (prev === uri ? null : uri))}
-                          style={{ cursor: 'pointer' }}
-                        />,
-                        <Line
-                          key={uri}
-                          type="monotone"
-                          dataKey={uri}
-                          stroke={CAT[i % CAT.length]}
-                          dot={false}
-                          strokeWidth={2}
-                          strokeOpacity={highlightedUri && highlightedUri !== uri ? 0.15 : 1}
-                          onClick={() => setHighlightedUri((prev) => (prev === uri ? null : uri))}
-                          style={{ cursor: 'pointer' }}
-                        />,
-                      ])}
-                    </LineChart>
-                  </ResponsiveContainer>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginTop: 12 }}>
-                    {uris.map((uri, i) => {
-                      const dimmed = highlightedUri && highlightedUri !== uri;
-                      return (
-                        <span
-                          key={uri}
-                          onClick={() => setHighlightedUri((prev) => (prev === uri ? null : uri))}
-                          style={{
-                            cursor: 'pointer',
-                            fontSize: 12,
-                            color: CAT[i % CAT.length],
-                            opacity: dimmed ? 0.35 : 1,
-                            fontWeight: highlightedUri === uri ? 500 : 400,
-                          }}
-                        >
-                          ● {uri}
-                        </span>
-                      );
-                    })}
-                  </div>
-                </SoftCard>
-              </Col>
-            </Row>
-
-            {/* 3. 원인 후보 — 왜 느린가? */}
-            <SectionTitle>원인 후보</SectionTitle>
-            <Row gutter={[16, 16]}>
-              <Col xs={24} sm={12} lg={6}>
-                <SoftCard title="스레드풀 사용률 (%)">
-                  <ResponsiveContainer width="100%" height={180}>
-                    <AreaChart data={threadChart}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#eef0f2" />
-                      <XAxis dataKey="time" fontSize={11} />
-                      <YAxis fontSize={11} domain={[0, 100]} />
-                      <Tooltip />
-                      <Area type="monotone" dataKey="usagePct" stroke={CAT[0]} fill={`${CAT[0]}22`} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                  <HintText>{hintFor('thread', data.threadPoolUsagePercent)}</HintText>
-                </SoftCard>
-              </Col>
-              <Col xs={24} sm={12} lg={6}>
-                <SoftCard title="DB 커넥션풀 사용률 (%)">
-                  <ResponsiveContainer width="100%" height={180}>
-                    <AreaChart data={hikariChart}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#eef0f2" />
-                      <XAxis dataKey="time" fontSize={11} />
-                      <YAxis fontSize={11} domain={[0, 100]} />
-                      <Tooltip />
-                      <Area type="monotone" dataKey="usagePct" stroke={CAT[2]} fill={`${CAT[2]}22`} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                  <HintText>{hintFor('hikari', data.hikariUsagePercent)}</HintText>
-                </SoftCard>
-              </Col>
-              <Col xs={24} sm={12} lg={6}>
-                <SoftCard title="JVM 힙 사용률 추이 (%)">
-                  <ResponsiveContainer width="100%" height={180}>
-                    <AreaChart data={heapChart}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#eef0f2" />
-                      <XAxis dataKey="time" fontSize={11} />
-                      <YAxis fontSize={11} domain={[0, 100]} />
-                      <Tooltip />
-                      <Area type="monotone" dataKey="usagePct" stroke={CAT[1]} fill={`${CAT[1]}22`} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                  <HintText>GC 오버헤드 차트와 같이 보면 원인 파악에 도움됨</HintText>
-                </SoftCard>
-              </Col>
-              <Col xs={24} sm={12} lg={6}>
-                <SoftCard title="GC 오버헤드">
-                  <ResponsiveContainer width="100%" height={180}>
-                    <AreaChart data={gcChart}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#eef0f2" />
-                      <XAxis dataKey="time" fontSize={11} />
-                      <YAxis fontSize={11} width={50} domain={[0, 'auto']} tickCount={6} />
-                      <Tooltip />
-                      <Area type="monotone" dataKey="overhead" stroke={CAT[3]} fill={`${CAT[3]}22`} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                  <HintText>잦아지거나 오래 걸리면 응답 지연의 흔한 원인</HintText>
-                </SoftCard>
-              </Col>
-            </Row>
-          </>
-        )
+        <SoftCard>
+          <ApiPanel detail={current} />
+        </SoftCard>
       )}
     </div>
   );
