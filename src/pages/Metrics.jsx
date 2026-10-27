@@ -282,6 +282,25 @@ function NowRow({ data }) {
   );
 }
 
+// 배포(앱 재시작) 시각에 세로 점선. 배포 전후로 지표가 달라졌는지 바로 비교하려는 용도.
+function deployMarks(data, fmt, { yAxisId, label } = {}) {
+  const { start, end, step } = data.range;
+  const lastBucket = start + Math.floor((end - start) / step) * step;
+  return (data.restarts || []).map((t) => {
+    const bucket = Math.min(start + Math.ceil((t - start) / step) * step, lastBucket);
+    return (
+      <ReferenceLine
+        key={t}
+        x={dayjs(bucket * 1000).format(fmt)}
+        yAxisId={yAxisId}
+        stroke={GRAY}
+        strokeDasharray="4 3"
+        label={label ? { value: '배포/재시작', position: 'insideTopLeft', fontSize: 10, fill: GRAY } : undefined}
+      />
+    );
+  });
+}
+
 // 3행: 원인 1(서버 자원), 2(DB/풀)
 function CauseRow({ data, fmt }) {
   const ts = rangeTimestamps(data.range);
@@ -332,6 +351,7 @@ function CauseRow({ data, fmt }) {
           <ChartBox height={90}>
             <LineChart data={jvm}>
               {grid}
+              {deployMarks(data, fmt)}
               <XAxis dataKey="time" {...axis} minTickGap={24} />
               <YAxis {...axis} width={48} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
               <Tooltip formatter={(v, name) => [`${v.toFixed(1)}%`, name]} />
@@ -346,6 +366,7 @@ function CauseRow({ data, fmt }) {
           <ChartBox height={90}>
             <LineChart data={jvm}>
               {grid}
+              {deployMarks(data, fmt)}
               <XAxis dataKey="time" {...axis} minTickGap={24} />
               <YAxis {...axis} width={48} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
               <Tooltip formatter={(v, name) => [`${v.toFixed(1)}%`, name]} />
@@ -359,6 +380,7 @@ function CauseRow({ data, fmt }) {
           <ChartBox height={90}>
             <AreaChart data={jvm}>
               {grid}
+              {deployMarks(data, fmt)}
               <XAxis dataKey="time" {...axis} minTickGap={24} />
               <YAxis {...axis} width={48} domain={SECONDS_DOMAIN} tickFormatter={formatSeconds} />
               <Tooltip formatter={(v) => [formatSeconds(v), 'GC 정지']} />
@@ -372,6 +394,7 @@ function CauseRow({ data, fmt }) {
           <ChartBox height={90}>
             <LineChart data={jvm}>
               {grid}
+              {deployMarks(data, fmt)}
               <XAxis dataKey="time" {...axis} minTickGap={24} />
               <YAxis {...axis} width={48} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
               <Tooltip formatter={(v) => [`${v.toFixed(1)}%`, 'live set']} />
@@ -402,6 +425,7 @@ function CauseRow({ data, fmt }) {
             {/* 기다리는 요청은 0이면 아무것도 안 그린다(선으로 그리면 0인데도 바닥에 빨간 선이 깔려 고갈처럼 보임) */}
             <ComposedChart data={pool.map((r) => ({ ...r, pending: r.pending > 0 ? r.pending : null }))}>
               {grid}
+              {deployMarks(data, fmt)}
               <XAxis dataKey="time" {...axis} minTickGap={24} />
               <YAxis {...axis} width={48} allowDecimals={false} domain={[0, data.poolMax || 'auto']} />
               <Tooltip formatter={(v, name) => [`${Math.round(v)}개`, name]} />
@@ -416,6 +440,7 @@ function CauseRow({ data, fmt }) {
           <ChartBox height={100}>
             <ComposedChart data={pool}>
               {grid}
+              {deployMarks(data, fmt, { yAxisId: 'n' })}
               <XAxis dataKey="time" {...axis} minTickGap={24} />
               <YAxis yAxisId="n" {...axis} width={48} allowDecimals={false} />
               <YAxis yAxisId="s" orientation="right" {...axis} width={48} domain={SECONDS_DOMAIN} tickFormatter={formatSeconds} />
@@ -434,6 +459,7 @@ function CauseRow({ data, fmt }) {
           <ChartBox height={100}>
             <LineChart data={pool}>
               {grid}
+              {deployMarks(data, fmt)}
               <XAxis dataKey="time" {...axis} minTickGap={24} />
               <YAxis {...axis} width={48} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
               <Tooltip formatter={(v) => [`${v.toFixed(1)}%`, 'RDS CPU']} />
@@ -502,6 +528,7 @@ function TrafficRow({ data, fmt }) {
         {/* 두 차트는 같은 rows라 순서가 곧 시각 -> syncId로 한쪽에 마우스를 올리면 다른 쪽도 같은 시각을 가리킨다 */}
         <ComposedChart data={rows} syncId="traffic">
           {grid}
+          {deployMarks(data, fmt, { label: true })}
           <XAxis dataKey="time" {...axis} minTickGap={24} />
           <YAxis {...axis} width={52} allowDecimals={false} />
           {requestTooltip}
@@ -515,6 +542,7 @@ function TrafficRow({ data, fmt }) {
       <ChartBox height={100}>
         <ComposedChart data={rows} syncId="traffic">
           {grid}
+          {deployMarks(data, fmt)}
           <XAxis dataKey="time" {...axis} minTickGap={24} />
           <YAxis {...axis} width={52} domain={SECONDS_DOMAIN} tickFormatter={formatSeconds} />
           {latencyTooltip}

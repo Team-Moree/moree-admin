@@ -80,7 +80,9 @@ export function buildMockMetrics(rangeHours = 1, view = 'overview') {
     range,
     upNow: 1,
     upSeries: at((i, len) => (Math.abs(i - Math.floor(len * 0.65)) <= 1 ? 0 : 1)),
-    startTime: end - 3 * 86400,
+    // 기간의 약 1/3 지점에서 배포(재시작)했다고 가정 -> 차트에 세로 점선
+    startTime: start + Math.floor((end - start) * 0.35),
+    restarts: [start + Math.floor((end - start) * 0.35)],
     requests: 1842,
     requestsPrev: 1610,
     latencyMax: 42,

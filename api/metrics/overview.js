@@ -228,6 +228,8 @@ function overviewQueries(config, { rangeHours, start, end, step }) {
     upNow: instant(`min_over_time(up{${UP_FILTER}}[2m])`),
     upSeries: ranged(`min_over_time(up{${UP_FILTER}}[${W}])`),
     startTime: instant('max(process_start_time_seconds)'),
+    // 앱 시작 시각의 변화 = 재시작(배포 포함). 차트에 세로선으로 표시한다.
+    startTimeSeries: ranged('max(process_start_time_seconds)'),
     requests: instant(`sum(increase(http_server_requests_seconds_count{${APP_URI_FILTER}}[${R}]))`),
     // 직전 같은 길이 구간. 요청 수는 비교 대상이 있어야 "늘었나"를 판단할 수 있다.
     requestsPrev: instant(
@@ -293,11 +295,14 @@ async function runNamed(queries) {
   return Object.fromEntries(keys.map((k, i) => [k, results[i]]));
 }
 
-function toOverviewBody(r) {
+function toOverviewBody(r, { start, end }) {
   return {
     upNow: first(r.upNow),
     upSeries: series(r.upSeries),
     startTime: first(r.startTime),
+    restarts: [...new Set(series(r.startTimeSeries).map(([, v]) => Math.floor(v)))].filter(
+      (t) => t > start && t <= end
+    ),
     requests: first(r.requests) ?? 0,
     requestsPrev: first(r.requestsPrev),
     latencyMax: first(r.latencyMax),
@@ -378,7 +383,7 @@ export default async function handler(req, res) {
     const body =
       view === 'overview'
         ? {
-            ...toOverviewBody(await runNamed(overviewQueries(config, params))),
+            ...toOverviewBody(await runNamed(overviewQueries(config, params)), params),
             ...(await queryCloudWatch(config, params)),
           }
         : toDetailBody(await runNamed(detailQueries(config, params)));
