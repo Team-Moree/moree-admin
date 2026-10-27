@@ -10,7 +10,7 @@ metricsClient.interceptors.request.use((config) => {
   return config;
 });
 
-// rangeHours 생략 시 함수가 최근 6시간으로 기본 처리한다.
-export function fetchMetricsOverview({ rangeHours } = {}) {
-  return metricsClient.get('/overview', { params: { rangeHours } }).then((res) => res.data);
+// 생략 시 함수 기본값: rangeHours 1, view 'overview', end 지금(초).
+export function fetchMetricsOverview({ rangeHours, view, end } = {}) {
+  return metricsClient.get('/overview', { params: { rangeHours, view, end } }).then((res) => res.data);
 }
