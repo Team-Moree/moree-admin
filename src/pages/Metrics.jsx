@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Card, Row, Col, Segmented, Button, Alert, Spin, Table, Typography, Tag, Tabs, Space, Input } from 'antd';
+import { Card, Row, Col, Segmented, Button, Alert, Spin, Table, Typography, Tag, Tabs, Space, Input, Switch } from 'antd';
 import { ReloadOutlined, ExportOutlined } from '@ant-design/icons';
 import {
   ResponsiveContainer,
@@ -682,6 +682,7 @@ export default function Metrics() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [mock, setMock] = useState(false); // [MOCK] 데모 데이터 토글
+  const [autoRefresh, setAutoRefresh] = useState(false);
   const view = TAB_VIEW[tab];
 
   const load = useCallback(() => {
@@ -700,6 +701,14 @@ export default function Metrics() {
     load();
   }, [load]);
 
+  // 행사 오픈/푸시 발송처럼 지켜볼 때만 켠다. 켰을 때만 1분마다 조회하고, 특정 시각 기준(end)으로 볼 땐 의미가 없어 끈다.
+  const autoRefreshOn = autoRefresh && !end;
+  useEffect(() => {
+    if (!autoRefreshOn) return undefined;
+    const id = setInterval(load, 60 * 1000);
+    return () => clearInterval(id);
+  }, [autoRefreshOn, load]);
+
   const fmt = timeFormat(rangeHours);
   // 탭 전환 직후엔 이전 탭 응답이 남아 있어 스키마가 다르다 -> 현재 탭 응답일 때만 그린다
   const current = data?.view === view ? data : null;
@@ -716,6 +725,14 @@ export default function Metrics() {
           <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
             조회
           </Button>
+        </Col>
+        <Col>
+          <Space size={6}>
+            <Switch size="small" checked={autoRefreshOn} disabled={!!end} onChange={setAutoRefresh} />
+            <Text type="secondary" style={{ fontSize: 13 }}>
+              1분마다 자동 조회
+            </Text>
+          </Space>
         </Col>
         <Col>
           {/* [MOCK] 데모 토글 */}
