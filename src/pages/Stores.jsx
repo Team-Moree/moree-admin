@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Image, Spin, Popconfirm, Alert, Input, Form, DatePicker, Upload, Switch, Segmented, Badge } from 'antd';
+import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Image, Spin, Popconfirm, Alert, Input, Form, DatePicker, Upload, Switch, Segmented, Badge, Checkbox } from 'antd';
 import { CloseOutlined, DeleteOutlined, EditOutlined, EnvironmentOutlined, FilterOutlined, HolderOutlined, PlusOutlined, TableOutlined, UploadOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import dayjs from 'dayjs';
@@ -251,6 +251,12 @@ const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
 const KOREAN_WEEKDAYS_BY_DAY_INDEX = ['일', '월', '화', '수', '목', '금', '토'];
 const dateToKoreanWeekday = (date) => KOREAN_WEEKDAYS_BY_DAY_INDEX[dayjs(date).day()];
 const TIME_PATTERN = /^([01][0-9]|2[0-4]):[0-5][0-9]$/;
+// 서버 합의: 미정 날짜는 null 대신 이 값으로 주고받는다 (null은 상시/폐업 의미).
+const UNDECIDED_DATE = '9999-12-31';
+const formatStoreDate = (date) => (date === UNDECIDED_DATE ? '미정' : date);
+const formatStorePeriod = (startDate, finishDate) => (
+  startDate === UNDECIDED_DATE ? '미정' : `${startDate || '-'} ~ ${formatStoreDate(finishDate) || '-'}`
+);
 const LINK_TYPE_OPTIONS = [
   { value: 'HOMEPAGE', label: '홈페이지' },
   { value: 'PRE_RESERVATION', label: '사전예약' },
@@ -431,6 +437,8 @@ const getUploadedImageUrl = (data) => (
 );
 
 const buildOperationHours = (values) => {
+  if (values.operationHoursUndecided) return [];
+
   if (values.useDateOperationHours) {
     return compactList(values.operationDates)
       .filter((item) => item?.date && item?.open && item?.close)
@@ -462,6 +470,15 @@ const buildOperationHours = (values) => {
 
 const hasOperationHours = (values) => buildOperationHours(values).length > 0;
 
+const buildPeriod = (values) => {
+  if (values.periodUndecided) return { start: UNDECIDED_DATE, finish: UNDECIDED_DATE };
+  const [start, finish] = values.period || [];
+  return {
+    start: start ? dayjs(start).format('YYYY-MM-DD') : null,
+    finish: values.finishUndecided ? UNDECIDED_DATE : (finish ? dayjs(finish).format('YYYY-MM-DD') : null),
+  };
+};
+
 const buildStoreCreateRequest = (values, imageUrls) => {
   const request = {
     title: normalizeText(values.title),
@@ -487,11 +504,9 @@ const buildStoreCreateRequest = (values, imageUrls) => {
       })),
   };
 
-  if (values.period?.[0] && values.period?.[1]) {
-    request.period = {
-      start: dayjs(values.period[0]).format('YYYY-MM-DD'),
-      finish: dayjs(values.period[1]).format('YYYY-MM-DD'),
-    };
+  const period = buildPeriod(values);
+  if (period.start && period.finish) {
+    request.period = period;
   }
 
   return request;
@@ -508,8 +523,8 @@ const buildStoreEditRequest = (values, imageUrls) => ({
   latitude: Number(values.latitude),
   longitude: Number(values.longitude),
   phoneNumber: normalizeOptionalText(values.phoneNumber),
-  startDate: values.period?.[0] ? dayjs(values.period[0]).format('YYYY-MM-DD') : null,
-  finishDate: values.period?.[1] ? dayjs(values.period[1]).format('YYYY-MM-DD') : null,
+  startDate: buildPeriod(values).start,
+  finishDate: buildPeriod(values).finish,
   hasGacha: values.hasGacha === true,
   keywords: compactList(values.keywords).map(normalizeText).filter(Boolean),
   operationHours: buildOperationHours(values),
@@ -539,14 +554,17 @@ const getStoreEditFormValues = (store) => {
     longitude: store?.longitude ?? '',
     phoneNumber: store?.phoneNumber || '',
     hasGacha: !!store?.hasGacha,
-    period: store?.startDate && store?.finishDate
-      ? [dayjs(store.startDate), dayjs(store.finishDate)]
+    period: store?.startDate && store?.finishDate && store.startDate !== UNDECIDED_DATE
+      ? [dayjs(store.startDate), store.finishDate === UNDECIDED_DATE ? null : dayjs(store.finishDate)]
       : null,
+    periodUndecided: store?.startDate === UNDECIDED_DATE,
+    finishUndecided: !!store?.startDate && store.startDate !== UNDECIDED_DATE && store.finishDate === UNDECIDED_DATE,
     fandomCategoryIds: Array.isArray(store?.fandomCategories)
       ? store.fandomCategories.map((item) => item.fandomCategoryId)
       : [],
     keywords: Array.isArray(store?.keywords) ? store.keywords : [],
     useCustomOperationHours,
+    operationHoursUndecided: operationHours.length === 0,
     commonOpen: firstHour.open || '10:00',
     commonClose: firstHour.close || '20:00',
     operationHours: WEEKDAYS.map((day) => ({
@@ -621,9 +639,64 @@ const renderReorderableUploadItem = (fileList, setFileList, dragIndexRef) => (or
   );
 };
 
+const StorePeriodFields = () => {
+  const form = Form.useFormInstance();
+  const periodUndecided = Form.useWatch('periodUndecided', form);
+  const finishUndecided = !!Form.useWatch('finishUndecided', form);
+
+  return (
+    <Form.Item label="기간" extra="상시 운영이면 비워두세요. 일정이 정해지지 않았으면 미정을 체크해주세요.">
+      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Form.Item
+          name="period"
+          noStyle
+          dependencies={['periodUndecided', 'finishUndecided']}
+          rules={[({ getFieldValue }) => ({
+            validator(_, value) {
+              if (getFieldValue('periodUndecided')) return Promise.resolve();
+              if (getFieldValue('finishUndecided') && !value?.[0]) {
+                return Promise.reject(new Error('종료일 미정이면 시작일을 선택해주세요.'));
+              }
+              if (!getFieldValue('finishUndecided') && value?.[0] && !value?.[1]) {
+                return Promise.reject(new Error('종료일을 선택하거나 종료일 미정을 체크해주세요.'));
+              }
+              return Promise.resolve();
+            },
+          })]}
+        >
+          <DatePicker.RangePicker
+            style={{ width: '100%' }}
+            format="YYYY-MM-DD"
+            disabled={periodUndecided || [false, finishUndecided]}
+            allowEmpty={[false, finishUndecided]}
+          />
+        </Form.Item>
+        <Space>
+          <Form.Item name="finishUndecided" valuePropName="checked" noStyle>
+            <Checkbox
+              disabled={periodUndecided}
+              onChange={(e) => {
+                const start = form.getFieldValue('period')?.[0];
+                if (e.target.checked) form.setFieldValue('period', start ? [start, null] : null);
+              }}
+            >
+              종료일 미정
+            </Checkbox>
+          </Form.Item>
+          <Form.Item name="periodUndecided" valuePropName="checked" noStyle>
+            <Checkbox onChange={(e) => e.target.checked && form.setFieldValue('period', null)}>기간 미정</Checkbox>
+          </Form.Item>
+        </Space>
+      </Space>
+    </Form.Item>
+  );
+};
+
 export default function Stores() {
   const [createForm] = Form.useForm();
   const [editForm] = Form.useForm();
+  const createOperationHoursUndecided = Form.useWatch('operationHoursUndecided', createForm);
+  const editOperationHoursUndecided = Form.useWatch('operationHoursUndecided', editForm);
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -1287,7 +1360,7 @@ export default function Stores() {
       return;
     }
 
-    if (!hasOperationHours(values)) {
+    if (!values.operationHoursUndecided && !hasOperationHours(values)) {
       notification.error({
         message: '운영 시간 확인 필요',
         description: '운영 요일을 하나 이상 남겨주세요.',
@@ -1335,7 +1408,7 @@ export default function Stores() {
       return;
     }
 
-    if (!hasOperationHours(values)) {
+    if (!values.operationHoursUndecided && !hasOperationHours(values)) {
       notification.error({
         message: '운영 시간 확인 필요',
         description: '운영 요일을 하나 이상 남겨주세요.',
@@ -1466,7 +1539,7 @@ export default function Stores() {
       key: 'period',
       width: 200,
       render: (_, record) => (record.startDate && record.finishDate
-        ? `${record.startDate} ~ ${record.finishDate}` : '-'),
+        ? formatStorePeriod(record.startDate, record.finishDate) : '-'),
     },
     {
       title: '승인 상태',
@@ -1788,7 +1861,7 @@ export default function Stores() {
                 <div>
                   <div className="store-detail-label">기간</div>
                   <div className="store-detail-value store-detail-value-box">
-                    {detail.startDate || '-'} ~ {detail.finishDate || '-'}
+                    {formatStorePeriod(detail.startDate, detail.finishDate)}
                   </div>
                 </div>
                 <div className="store-detail-item-full">
@@ -1804,7 +1877,7 @@ export default function Stores() {
                           ))}
                         </div>
                       )
-                      : '-'}
+                      : '미정'}
                   </div>
                 </div>
               </div>
@@ -1992,130 +2065,131 @@ export default function Stores() {
           </Form.Item>
 
           <Typography.Title className="store-form-section-title" level={5}>기간 및 운영 시간</Typography.Title>
-          <Form.Item
-            label="기간"
-            name="period"
-            extra="상시 운영이면 비워두세요."
-          >
-            <DatePicker.RangePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
-          </Form.Item>
+          <StorePeriodFields />
           <Form.Item name="useCustomOperationHours" hidden>
             <Input type="hidden" />
           </Form.Item>
           <Form.Item label="운영 시간" required>
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              <Space wrap align="baseline">
-                <Form.Item
-                  name="commonOpen"
-                  noStyle
-                  rules={[
-                    { required: true, message: '오픈 시간을 입력해주세요.' },
-                    { pattern: TIME_PATTERN, message: 'HH:mm 형식으로 입력해주세요.' },
-                  ]}
-                >
-                  <Input placeholder="10:00" style={{ width: 140 }} />
-                </Form.Item>
-                <Typography.Text>부터</Typography.Text>
-                <Form.Item
-                  name="commonClose"
-                  noStyle
-                  rules={[
-                    { required: true, message: '마감 시간을 입력해주세요.' },
-                    { pattern: TIME_PATTERN, message: 'HH:mm 형식으로 입력해주세요.' },
-                  ]}
-                >
-                  <Input placeholder="20:00" style={{ width: 140 }} />
-                </Form.Item>
-                <Typography.Text>까지</Typography.Text>
-                <Switch
-                  checked={useCustomEditOperationHours}
-                  checkedChildren="요일별"
-                  unCheckedChildren="매일 동일"
-                  onChange={handleEditOperationModeChange}
-                />
-              </Space>
-              {useCustomEditOperationHours && (
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                  <Form.Item noStyle shouldUpdate>
-                    {({ getFieldValue }) => {
-                      const operationHours = getFieldValue('operationHours') || [];
-                      const activeDays = WEEKDAYS
-                        .map((day, index) => ({
-                          day,
-                          index,
-                          isActive: !editExcludedOperationDays.includes(index),
-                        }))
-                        .filter((item) => item.isActive);
-                      const inactiveDays = WEEKDAYS
-                        .map((day, index) => ({
-                          day,
-                          index,
-                          isActive: !editExcludedOperationDays.includes(index),
-                        }))
-                        .filter((item) => !item.isActive);
+              <Form.Item name="operationHoursUndecided" valuePropName="checked" noStyle>
+                <Checkbox>영업 시간 미정</Checkbox>
+              </Form.Item>
+              {!editOperationHoursUndecided && (
+                <>
+                  <Space wrap align="baseline">
+                    <Form.Item
+                      name="commonOpen"
+                      noStyle
+                      rules={[
+                        { required: true, message: '오픈 시간을 입력해주세요.' },
+                        { pattern: TIME_PATTERN, message: 'HH:mm 형식으로 입력해주세요.' },
+                      ]}
+                    >
+                      <Input placeholder="10:00" style={{ width: 140 }} />
+                    </Form.Item>
+                    <Typography.Text>부터</Typography.Text>
+                    <Form.Item
+                      name="commonClose"
+                      noStyle
+                      rules={[
+                        { required: true, message: '마감 시간을 입력해주세요.' },
+                        { pattern: TIME_PATTERN, message: 'HH:mm 형식으로 입력해주세요.' },
+                      ]}
+                    >
+                      <Input placeholder="20:00" style={{ width: 140 }} />
+                    </Form.Item>
+                    <Typography.Text>까지</Typography.Text>
+                    <Switch
+                      checked={useCustomEditOperationHours}
+                      checkedChildren="요일별"
+                      unCheckedChildren="매일 동일"
+                      onChange={handleEditOperationModeChange}
+                    />
+                  </Space>
+                  {useCustomEditOperationHours && (
+                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                      <Form.Item noStyle shouldUpdate>
+                        {({ getFieldValue }) => {
+                          const operationHours = getFieldValue('operationHours') || [];
+                          const activeDays = WEEKDAYS
+                            .map((day, index) => ({
+                              day,
+                              index,
+                              isActive: !editExcludedOperationDays.includes(index),
+                            }))
+                            .filter((item) => item.isActive);
+                          const inactiveDays = WEEKDAYS
+                            .map((day, index) => ({
+                              day,
+                              index,
+                              isActive: !editExcludedOperationDays.includes(index),
+                            }))
+                            .filter((item) => !item.isActive);
 
-                      return (
-                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                          {activeDays.map(({ day, index }) => (
-                            <Space key={day} wrap align="baseline">
-                              <Form.Item name={['operationHours', index, 'isActive']} hidden>
-                                <HiddenBooleanField />
-                              </Form.Item>
-                              <Typography.Text strong style={{ width: 32 }}>
-                                {day}
-                              </Typography.Text>
-                              <Form.Item
-                                name={['operationHours', index, 'open']}
-                                noStyle
-                                rules={[
-                                  { required: true, message: `${day}요일 오픈 시간` },
-                                  { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
-                                ]}
-                              >
-                                <Input placeholder="10:00" style={{ width: 140 }} />
-                              </Form.Item>
-                              <Typography.Text>부터</Typography.Text>
-                              <Form.Item
-                                name={['operationHours', index, 'close']}
-                                noStyle
-                                rules={[
-                                  { required: true, message: `${day}요일 마감 시간` },
-                                  { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
-                                ]}
-                              >
-                                <Input placeholder="20:00" style={{ width: 140 }} />
-                              </Form.Item>
-                              <Typography.Text>까지</Typography.Text>
-                              <Button
-                                aria-label={`${day}요일 제외`}
-                                htmlType="button"
-                                icon={<CloseOutlined />}
-                                size="small"
-                                type="text"
-                                onClick={() => setOperationDayActive(editForm, index, false, setEditExcludedOperationDays)}
-                              />
-                            </Space>
-                          ))}
-                          {inactiveDays.length > 0 && (
-                            <Space wrap>
-                              <Typography.Text type="secondary">제외한 요일</Typography.Text>
-                              {inactiveDays.map(({ day, index }) => (
-                                <Button
-                                  key={day}
-                                  htmlType="button"
-                                  size="small"
-                                  onClick={() => setOperationDayActive(editForm, index, true, setEditExcludedOperationDays)}
-                                >
-                                  {day} 추가
-                                </Button>
+                          return (
+                            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                              {activeDays.map(({ day, index }) => (
+                                <Space key={day} wrap align="baseline">
+                                  <Form.Item name={['operationHours', index, 'isActive']} hidden>
+                                    <HiddenBooleanField />
+                                  </Form.Item>
+                                  <Typography.Text strong style={{ width: 32 }}>
+                                    {day}
+                                  </Typography.Text>
+                                  <Form.Item
+                                    name={['operationHours', index, 'open']}
+                                    noStyle
+                                    rules={[
+                                      { required: true, message: `${day}요일 오픈 시간` },
+                                      { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
+                                    ]}
+                                  >
+                                    <Input placeholder="10:00" style={{ width: 140 }} />
+                                  </Form.Item>
+                                  <Typography.Text>부터</Typography.Text>
+                                  <Form.Item
+                                    name={['operationHours', index, 'close']}
+                                    noStyle
+                                    rules={[
+                                      { required: true, message: `${day}요일 마감 시간` },
+                                      { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
+                                    ]}
+                                  >
+                                    <Input placeholder="20:00" style={{ width: 140 }} />
+                                  </Form.Item>
+                                  <Typography.Text>까지</Typography.Text>
+                                  <Button
+                                    aria-label={`${day}요일 제외`}
+                                    htmlType="button"
+                                    icon={<CloseOutlined />}
+                                    size="small"
+                                    type="text"
+                                    onClick={() => setOperationDayActive(editForm, index, false, setEditExcludedOperationDays)}
+                                  />
+                                </Space>
                               ))}
+                              {inactiveDays.length > 0 && (
+                                <Space wrap>
+                                  <Typography.Text type="secondary">제외한 요일</Typography.Text>
+                                  {inactiveDays.map(({ day, index }) => (
+                                    <Button
+                                      key={day}
+                                      htmlType="button"
+                                      size="small"
+                                      onClick={() => setOperationDayActive(editForm, index, true, setEditExcludedOperationDays)}
+                                    >
+                                      {day} 추가
+                                    </Button>
+                                  ))}
+                                </Space>
+                              )}
                             </Space>
-                          )}
-                        </Space>
-                      );
-                    }}
-                  </Form.Item>
-                </Space>
+                          );
+                        }}
+                      </Form.Item>
+                    </Space>
+                  )}
+                </>
               )}
             </Space>
           </Form.Item>
@@ -2311,13 +2385,7 @@ export default function Stores() {
           </Form.Item>
 
           <Typography.Title className="store-form-section-title" level={5}>기간 및 운영 시간</Typography.Title>
-          <Form.Item
-            label="기간"
-            name="period"
-            extra="상시 운영이면 비워두세요."
-          >
-            <DatePicker.RangePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
-          </Form.Item>
+          <StorePeriodFields />
           <Form.Item name="useCustomOperationHours" hidden>
             <Input type="hidden" />
           </Form.Item>
@@ -2326,206 +2394,213 @@ export default function Stores() {
               <Form.Item name="useDateOperationHours" hidden>
                 <Input type="hidden" />
               </Form.Item>
-              <Segmented
-                value={createOperationMode}
-                onChange={handleCreateOperationModeChange}
-                options={[
-                  { label: '매일 동일', value: 'common' },
-                  { label: '요일별', value: 'weekday' },
-                  { label: '날짜 지정', value: 'date' },
-                ]}
-              />
-              {createOperationMode === 'common' && (
-                <Space wrap align="baseline">
-                  <Form.Item
-                    name="commonOpen"
-                    noStyle
-                    rules={[
-                      { required: true, message: '오픈 시간을 입력해주세요.' },
-                      { pattern: TIME_PATTERN, message: 'HH:mm 형식으로 입력해주세요.' },
+              <Form.Item name="operationHoursUndecided" valuePropName="checked" noStyle>
+                <Checkbox>영업 시간 미정</Checkbox>
+              </Form.Item>
+              {!createOperationHoursUndecided && (
+                <>
+                  <Segmented
+                    value={createOperationMode}
+                    onChange={handleCreateOperationModeChange}
+                    options={[
+                      { label: '매일 동일', value: 'common' },
+                      { label: '요일별', value: 'weekday' },
+                      { label: '날짜 지정', value: 'date' },
                     ]}
-                  >
-                    <Input placeholder="10:00" style={{ width: 140 }} />
-                  </Form.Item>
-                  <Typography.Text>부터</Typography.Text>
-                  <Form.Item
-                    name="commonClose"
-                    noStyle
-                    rules={[
-                      { required: true, message: '마감 시간을 입력해주세요.' },
-                      { pattern: TIME_PATTERN, message: 'HH:mm 형식으로 입력해주세요.' },
-                    ]}
-                  >
-                    <Input placeholder="20:00" style={{ width: 140 }} />
-                  </Form.Item>
-                  <Typography.Text>까지</Typography.Text>
-                </Space>
-              )}
-              {createOperationMode === 'weekday' && (
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                  <Form.Item noStyle shouldUpdate>
-                    {({ getFieldValue }) => {
-                      const operationHours = getFieldValue('operationHours') || [];
-                      const activeDays = WEEKDAYS
-                        .map((day, index) => ({
-                          day,
-                          index,
-                          isActive: !createExcludedOperationDays.includes(index),
-                        }))
-                        .filter((item) => item.isActive);
-                      const inactiveDays = WEEKDAYS
-                        .map((day, index) => ({
-                          day,
-                          index,
-                          isActive: !createExcludedOperationDays.includes(index),
-                        }))
-                        .filter((item) => !item.isActive);
-
-                      return (
-                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                          {activeDays.map(({ day, index }) => (
-                            <Space key={day} wrap align="baseline">
-                              <Form.Item name={['operationHours', index, 'isActive']} hidden>
-                                <HiddenBooleanField />
-                              </Form.Item>
-                              <Typography.Text strong style={{ width: 32 }}>
-                                {day}
-                              </Typography.Text>
-                              <Form.Item
-                                name={['operationHours', index, 'open']}
-                                noStyle
-                                rules={[
-                                  { required: true, message: `${day}요일 오픈 시간` },
-                                  { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
-                                ]}
-                              >
-                                <Input placeholder="10:00" style={{ width: 140 }} />
-                              </Form.Item>
-                              <Typography.Text>부터</Typography.Text>
-                              <Form.Item
-                                name={['operationHours', index, 'close']}
-                                noStyle
-                                rules={[
-                                  { required: true, message: `${day}요일 마감 시간` },
-                                  { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
-                                ]}
-                              >
-                                <Input placeholder="20:00" style={{ width: 140 }} />
-                              </Form.Item>
-                              <Typography.Text>까지</Typography.Text>
-                              <Button
-                                aria-label={`${day}요일 제외`}
-                                htmlType="button"
-                                icon={<CloseOutlined />}
-                                size="small"
-                                type="text"
-                                onClick={() => setOperationDayActive(createForm, index, false, setCreateExcludedOperationDays)}
-                              />
-                            </Space>
-                          ))}
-                          {inactiveDays.length > 0 && (
-                            <Space wrap>
-                              <Typography.Text type="secondary">제외한 요일</Typography.Text>
-                              {inactiveDays.map(({ day, index }) => (
-                                <Button
-                                  key={day}
-                                  htmlType="button"
-                                  size="small"
-                                  onClick={() => setOperationDayActive(createForm, index, true, setCreateExcludedOperationDays)}
-                                >
-                                  {day} 추가
-                                </Button>
-                              ))}
-                            </Space>
-                          )}
-                        </Space>
-                      );
-                    }}
-                  </Form.Item>
-                </Space>
-              )}
-              {createOperationMode === 'date' && (
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    선택한 날짜의 요일 기준으로 자동 변환되어 저장됩니다.
-                  </Typography.Text>
-                  <Form.List name="operationDates">
-                    {(fields, { add, remove }) => (
+                  />
+                  {createOperationMode === 'common' && (
+                    <Space wrap align="baseline">
+                      <Form.Item
+                        name="commonOpen"
+                        noStyle
+                        rules={[
+                          { required: true, message: '오픈 시간을 입력해주세요.' },
+                          { pattern: TIME_PATTERN, message: 'HH:mm 형식으로 입력해주세요.' },
+                        ]}
+                      >
+                        <Input placeholder="10:00" style={{ width: 140 }} />
+                      </Form.Item>
+                      <Typography.Text>부터</Typography.Text>
+                      <Form.Item
+                        name="commonClose"
+                        noStyle
+                        rules={[
+                          { required: true, message: '마감 시간을 입력해주세요.' },
+                          { pattern: TIME_PATTERN, message: 'HH:mm 형식으로 입력해주세요.' },
+                        ]}
+                      >
+                        <Input placeholder="20:00" style={{ width: 140 }} />
+                      </Form.Item>
+                      <Typography.Text>까지</Typography.Text>
+                    </Space>
+                  )}
+                  {createOperationMode === 'weekday' && (
+                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
                       <Form.Item noStyle shouldUpdate>
                         {({ getFieldValue }) => {
-                          const operationDates = getFieldValue('operationDates') || [];
-                          const weekdayByRow = operationDates.map((item) => (
-                            item?.date ? dateToKoreanWeekday(item.date) : null
-                          ));
-                          const period = getFieldValue('period') || [];
-                          const [periodStart, periodFinish] = period;
+                          const operationHours = getFieldValue('operationHours') || [];
+                          const activeDays = WEEKDAYS
+                            .map((day, index) => ({
+                              day,
+                              index,
+                              isActive: !createExcludedOperationDays.includes(index),
+                            }))
+                            .filter((item) => item.isActive);
+                          const inactiveDays = WEEKDAYS
+                            .map((day, index) => ({
+                              day,
+                              index,
+                              isActive: !createExcludedOperationDays.includes(index),
+                            }))
+                            .filter((item) => !item.isActive);
 
                           return (
                             <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                              {fields.map(({ key, name, ...restField }) => {
-                                const usedWeekdays = new Set(
-                                  weekdayByRow.filter((_, index) => index !== name),
-                                );
-
-                                return (
-                                  <Space key={key} wrap align="baseline">
-                                    <Form.Item
-                                      {...restField}
-                                      name={[name, 'date']}
-                                      noStyle
-                                      rules={[{ required: true, message: '날짜를 선택해주세요.' }]}
+                              {activeDays.map(({ day, index }) => (
+                                <Space key={day} wrap align="baseline">
+                                  <Form.Item name={['operationHours', index, 'isActive']} hidden>
+                                    <HiddenBooleanField />
+                                  </Form.Item>
+                                  <Typography.Text strong style={{ width: 32 }}>
+                                    {day}
+                                  </Typography.Text>
+                                  <Form.Item
+                                    name={['operationHours', index, 'open']}
+                                    noStyle
+                                    rules={[
+                                      { required: true, message: `${day}요일 오픈 시간` },
+                                      { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
+                                    ]}
+                                  >
+                                    <Input placeholder="10:00" style={{ width: 140 }} />
+                                  </Form.Item>
+                                  <Typography.Text>부터</Typography.Text>
+                                  <Form.Item
+                                    name={['operationHours', index, 'close']}
+                                    noStyle
+                                    rules={[
+                                      { required: true, message: `${day}요일 마감 시간` },
+                                      { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
+                                    ]}
+                                  >
+                                    <Input placeholder="20:00" style={{ width: 140 }} />
+                                  </Form.Item>
+                                  <Typography.Text>까지</Typography.Text>
+                                  <Button
+                                    aria-label={`${day}요일 제외`}
+                                    htmlType="button"
+                                    icon={<CloseOutlined />}
+                                    size="small"
+                                    type="text"
+                                    onClick={() => setOperationDayActive(createForm, index, false, setCreateExcludedOperationDays)}
+                                  />
+                                </Space>
+                              ))}
+                              {inactiveDays.length > 0 && (
+                                <Space wrap>
+                                  <Typography.Text type="secondary">제외한 요일</Typography.Text>
+                                  {inactiveDays.map(({ day, index }) => (
+                                    <Button
+                                      key={day}
+                                      htmlType="button"
+                                      size="small"
+                                      onClick={() => setOperationDayActive(createForm, index, true, setCreateExcludedOperationDays)}
                                     >
-                                      <DatePicker
-                                        format="YYYY-MM-DD"
-                                        placeholder="날짜 선택"
-                                        style={{ width: 160 }}
-                                        disabledDate={(current) => (
-                                          usedWeekdays.has(dateToKoreanWeekday(current))
-                                          || (periodStart && current.isBefore(periodStart, 'day'))
-                                          || (periodFinish && current.isAfter(periodFinish, 'day'))
-                                        )}
-                                      />
-                                    </Form.Item>
-                                    <Form.Item
-                                      {...restField}
-                                      name={[name, 'open']}
-                                      noStyle
-                                      rules={[
-                                        { required: true, message: '오픈 시간을 입력해주세요.' },
-                                        { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
-                                      ]}
-                                    >
-                                      <Input placeholder="10:00" style={{ width: 140 }} />
-                                    </Form.Item>
-                                    <Typography.Text>부터</Typography.Text>
-                                    <Form.Item
-                                      {...restField}
-                                      name={[name, 'close']}
-                                      noStyle
-                                      rules={[
-                                        { required: true, message: '마감 시간을 입력해주세요.' },
-                                        { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
-                                      ]}
-                                    >
-                                      <Input placeholder="20:00" style={{ width: 140 }} />
-                                    </Form.Item>
-                                    <Typography.Text>까지</Typography.Text>
-                                    <Button danger type="link" onClick={() => remove(name)}>
-                                      삭제
+                                      {day} 추가
                                     </Button>
-                                  </Space>
-                                );
-                              })}
-                              <Button onClick={() => add({ date: null, open: '10:00', close: '20:00' })}>
-                                날짜 추가
-                              </Button>
+                                  ))}
+                                </Space>
+                              )}
                             </Space>
                           );
                         }}
                       </Form.Item>
-                    )}
-                  </Form.List>
-                </Space>
+                    </Space>
+                  )}
+                  {createOperationMode === 'date' && (
+                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        선택한 날짜의 요일 기준으로 자동 변환되어 저장됩니다.
+                      </Typography.Text>
+                      <Form.List name="operationDates">
+                        {(fields, { add, remove }) => (
+                          <Form.Item noStyle shouldUpdate>
+                            {({ getFieldValue }) => {
+                              const operationDates = getFieldValue('operationDates') || [];
+                              const weekdayByRow = operationDates.map((item) => (
+                                item?.date ? dateToKoreanWeekday(item.date) : null
+                              ));
+                              const period = getFieldValue('period') || [];
+                              const [periodStart, periodFinish] = period;
+
+                              return (
+                                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                                  {fields.map(({ key, name, ...restField }) => {
+                                    const usedWeekdays = new Set(
+                                      weekdayByRow.filter((_, index) => index !== name),
+                                    );
+
+                                    return (
+                                      <Space key={key} wrap align="baseline">
+                                        <Form.Item
+                                          {...restField}
+                                          name={[name, 'date']}
+                                          noStyle
+                                          rules={[{ required: true, message: '날짜를 선택해주세요.' }]}
+                                        >
+                                          <DatePicker
+                                            format="YYYY-MM-DD"
+                                            placeholder="날짜 선택"
+                                            style={{ width: 160 }}
+                                            disabledDate={(current) => (
+                                              usedWeekdays.has(dateToKoreanWeekday(current))
+                                              || (periodStart && current.isBefore(periodStart, 'day'))
+                                              || (periodFinish && current.isAfter(periodFinish, 'day'))
+                                            )}
+                                          />
+                                        </Form.Item>
+                                        <Form.Item
+                                          {...restField}
+                                          name={[name, 'open']}
+                                          noStyle
+                                          rules={[
+                                            { required: true, message: '오픈 시간을 입력해주세요.' },
+                                            { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
+                                          ]}
+                                        >
+                                          <Input placeholder="10:00" style={{ width: 140 }} />
+                                        </Form.Item>
+                                        <Typography.Text>부터</Typography.Text>
+                                        <Form.Item
+                                          {...restField}
+                                          name={[name, 'close']}
+                                          noStyle
+                                          rules={[
+                                            { required: true, message: '마감 시간을 입력해주세요.' },
+                                            { pattern: TIME_PATTERN, message: 'HH:mm 형식' },
+                                          ]}
+                                        >
+                                          <Input placeholder="20:00" style={{ width: 140 }} />
+                                        </Form.Item>
+                                        <Typography.Text>까지</Typography.Text>
+                                        <Button danger type="link" onClick={() => remove(name)}>
+                                          삭제
+                                        </Button>
+                                      </Space>
+                                    );
+                                  })}
+                                  <Button onClick={() => add({ date: null, open: '10:00', close: '20:00' })}>
+                                    날짜 추가
+                                  </Button>
+                                </Space>
+                              );
+                            }}
+                          </Form.Item>
+                        )}
+                      </Form.List>
+                    </Space>
+                  )}
+                </>
               )}
             </Space>
           </Form.Item>
