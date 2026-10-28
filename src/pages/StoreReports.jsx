@@ -774,7 +774,9 @@ export default function StoreReports() {
               <Descriptions.Item label="주소">{storeAddress || '-'}</Descriptions.Item>
               <Descriptions.Item label="전화번호">{store.phoneNumber || '-'}</Descriptions.Item>
               <Descriptions.Item label="기간">
-                {store.startDate || '-'} ~ {store.finishDate || '-'}
+                {store.startDate === '9999-12-31'
+                  ? '미정'
+                  : `${store.startDate || '-'} ~ ${store.finishDate === '9999-12-31' ? '미정' : store.finishDate || '-'}`}
               </Descriptions.Item>
             </>
           )}
