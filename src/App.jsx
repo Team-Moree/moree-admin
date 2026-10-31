@@ -3,9 +3,9 @@ import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
-import Analytics from './pages/Analytics';
 import Metrics from './pages/Metrics';
 import Growth from './pages/Growth';
+import OpsMetrics from './pages/OpsMetrics';
 import FandomCategories from './pages/FandomCategories';
 import FandomTargets from './pages/FandomTargets';
 import StoreReports from './pages/StoreReports';
@@ -15,6 +15,7 @@ import Users from './pages/Users';
 import Morees from './pages/Morees';
 import BookmarkIcons from './pages/BookmarkIcons';
 import Notifications from './pages/Notifications';
+import AppNotices from './pages/AppNotices';
 
 function PrivateRoute({ children }) {
   const token = sessionStorage.getItem('masterToken');
@@ -34,7 +35,7 @@ export default function App() {
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/growth" element={<Growth />} />
-                  <Route path="/analytics" element={<Analytics />} />
+                  <Route path="/ops-metrics" element={<OpsMetrics />} />
                   <Route path="/metrics" element={<Metrics />} />
                   <Route path="/fandom-categories" element={<FandomCategories />} />
                   <Route path="/fandom-targets" element={<FandomTargets />} />
@@ -45,6 +46,7 @@ export default function App() {
                   <Route path="/morees" element={<Morees />} />
                   <Route path="/bookmark-icons" element={<BookmarkIcons />} />
                   <Route path="/notifications" element={<Notifications />} />
+                  <Route path="/app-notices" element={<AppNotices />} />
                 </Routes>
               </ErrorBoundary>
             </Layout>

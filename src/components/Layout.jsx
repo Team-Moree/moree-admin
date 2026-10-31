@@ -3,9 +3,9 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Layout as AntLayout, Menu, Button, theme } from 'antd';
 import {
   DashboardOutlined,
-  BarChartOutlined,
   LineChartOutlined,
   RiseOutlined,
+  FundOutlined,
   TagsOutlined,
   AimOutlined,
   ShopOutlined,
@@ -18,6 +18,7 @@ import {
   BellOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  MobileOutlined,
 } from '@ant-design/icons';
 import styled from 'styled-components';
 import EnvBadge from './EnvBadge';
@@ -55,7 +56,7 @@ const StyledContent = styled(Content)`
 const menuItems = [
   { key: '/', icon: <DashboardOutlined />, label: '대시보드' },
   { key: '/growth', icon: <RiseOutlined />, label: '핵심 성장 지표' },
-  { key: '/analytics', icon: <BarChartOutlined />, label: 'GA 분석' },
+  { key: '/ops-metrics', icon: <FundOutlined />, label: '운영 지표' },
   { key: '/fandom-categories', icon: <TagsOutlined />, label: '팬덤 카테고리' },
   { key: '/fandom-targets', icon: <AimOutlined />, label: '팬덤 타겟' },
   { key: '/stores', icon: <ShopOutlined />, label: '스토어' },
@@ -64,6 +65,7 @@ const menuItems = [
   { key: '/users', icon: <UserOutlined />, label: '유저' },
   { key: '/morees', icon: <SmileOutlined />, label: '모리' },
   { key: '/bookmark-icons', icon: <BookOutlined />, label: '북마크 아이콘' },
+  { key: '/app-notices', icon: <MobileOutlined />, label: '앱 업데이트 팝업' },
   { key: '/notifications', icon: <BellOutlined />, label: '푸시 알림 (QA)' },
   { key: '/metrics', icon: <LineChartOutlined />, label: '서버 메트릭' },
 ];
