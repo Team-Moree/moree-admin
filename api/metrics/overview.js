@@ -73,7 +73,7 @@ function readGrafanaConfig() {
 
 // EC2/RDS 지표는 앱(Prometheus)에 없어서 Grafana의 CloudWatch 데이터소스로 조회한다.
 // AWS 자격증명은 Grafana(Assume Role)에만 있고, 여기서는 같은 Grafana 토큰만 쓴다.
-const RELEASE_EC2 = { InstanceId: ['i-00e0809e4255b0490'] };
+const RELEASE_EC2 = { InstanceId: ['i-09e66eea72fd9d246'] };
 const RELEASE_RDS = { DBInstanceIdentifier: ['moree-rds-release'] };
 const CLOUDWATCH_METRICS = {
   hostMem: ['CWAgent', 'mem_used_percent', RELEASE_EC2, 'Maximum'],
