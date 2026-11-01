@@ -112,7 +112,7 @@ const LINKS = [
   { label: 'Grafana', href: 'https://loftysummit1845.grafana.net/explore' },
   {
     label: 'EC2',
-    href: 'https://ap-northeast-2.console.aws.amazon.com/ec2/home?region=ap-northeast-2#InstanceDetails:instanceId=i-00e0809e4255b0490',
+    href: 'https://ap-northeast-2.console.aws.amazon.com/ec2/home?region=ap-northeast-2#InstanceDetails:instanceId=i-09e66eea72fd9d246',
   },
   {
     label: 'RDS',
