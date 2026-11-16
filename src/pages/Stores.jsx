@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Image, Spin, Popconfirm, Alert, Input, Form, DatePicker, Upload, Switch, Segmented, Badge, Checkbox } from 'antd';
+import { Table, Tag, Typography, Result, Button, App, Select, Space, Modal, Image, Spin, Popconfirm, Alert, Input, Form, DatePicker, Upload, Switch, Segmented, Badge, Checkbox, Radio } from 'antd';
 import { CloseOutlined, DeleteOutlined, EditOutlined, EnvironmentOutlined, FilterOutlined, HolderOutlined, PlusOutlined, TableOutlined, UploadOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import dayjs from 'dayjs';
@@ -254,9 +254,15 @@ const TIME_PATTERN = /^([01][0-9]|2[0-4]):[0-5][0-9]$/;
 // 서버 합의: 미정 날짜는 null 대신 이 값으로 주고받는다 (null은 상시/폐업 의미).
 const UNDECIDED_DATE = '9999-12-31';
 const formatStoreDate = (date) => (date === UNDECIDED_DATE ? '미정' : date);
-const formatStorePeriod = (startDate, finishDate) => (
-  startDate === UNDECIDED_DATE ? '미정' : `${startDate || '-'} ~ ${formatStoreDate(finishDate) || '-'}`
-);
+// 시작일 없음 = 상시(종료일 = 폐업일), 시작일만 = 상시 오픈 예정, 둘 다 = 기간 한정
+const formatStorePeriod = (startDate, finishDate) => {
+  if (startDate === UNDECIDED_DATE) return '미정';
+  if (!startDate) return finishDate ? `상시 운영 (폐업 ${finishDate})` : '상시 운영';
+  if (!finishDate) return `상시 운영 (${startDate} 오픈)`;
+  return `${startDate} ~ ${formatStoreDate(finishDate)}`;
+};
+const isPermanentStore = (store) => !store?.startDate
+  || (store.startDate !== UNDECIDED_DATE && !store.finishDate);
 const LINK_TYPE_OPTIONS = [
   { value: 'HOMEPAGE', label: '홈페이지' },
   { value: 'PRE_RESERVATION', label: '사전예약' },
@@ -470,12 +476,18 @@ const buildOperationHours = (values) => {
 
 const hasOperationHours = (values) => buildOperationHours(values).length > 0;
 
+const formatDateValue = (value) => (value ? dayjs(value).format('YYYY-MM-DD') : null);
+
 const buildPeriod = (values) => {
+  // 상시: 시작일 = 오픈일, 종료일 = 기존 폐업일 유지
+  if (values.operationType === 'PERMANENT') {
+    return { start: formatDateValue(values.openDate), finish: values.closedDate || null };
+  }
   if (values.periodUndecided) return { start: UNDECIDED_DATE, finish: UNDECIDED_DATE };
   const [start, finish] = values.period || [];
   return {
-    start: start ? dayjs(start).format('YYYY-MM-DD') : null,
-    finish: values.finishUndecided ? UNDECIDED_DATE : (finish ? dayjs(finish).format('YYYY-MM-DD') : null),
+    start: formatDateValue(start),
+    finish: values.finishUndecided ? UNDECIDED_DATE : formatDateValue(finish),
   };
 };
 
@@ -486,6 +498,7 @@ const buildStoreCreateRequest = (values, imageUrls) => {
     imageUrls,
     description: normalizeText(values.description),
     hasGacha: values.hasGacha === true,
+    isPreReservation: values.isPreReservation === true,
     keywords: compactList(values.keywords).map(normalizeText).filter(Boolean),
     operationHours: buildOperationHours(values),
     location: {
@@ -505,7 +518,9 @@ const buildStoreCreateRequest = (values, imageUrls) => {
   };
 
   const period = buildPeriod(values);
-  if (period.start && period.finish) {
+  if (values.operationType === 'PERMANENT') {
+    if (period.start) request.openDate = period.start;
+  } else if (period.start && period.finish) {
     request.period = period;
   }
 
@@ -526,6 +541,7 @@ const buildStoreEditRequest = (values, imageUrls) => ({
   startDate: buildPeriod(values).start,
   finishDate: buildPeriod(values).finish,
   hasGacha: values.hasGacha === true,
+  isPreReservation: values.isPreReservation === true,
   keywords: compactList(values.keywords).map(normalizeText).filter(Boolean),
   operationHours: buildOperationHours(values),
   links: compactList(values.links)
@@ -543,6 +559,7 @@ const getStoreEditFormValues = (store) => {
     && operationHours.every((item) => item?.open === firstHour.open && item?.close === firstHour.close);
   const operationHourByDay = new Map(operationHours.map((item) => [item.day, item]));
   const useCustomOperationHours = operationHours.length > 0 && !hasSameHours;
+  const permanent = isPermanentStore(store);
 
   return {
     title: store?.title || '',
@@ -554,7 +571,11 @@ const getStoreEditFormValues = (store) => {
     longitude: store?.longitude ?? '',
     phoneNumber: store?.phoneNumber || '',
     hasGacha: !!store?.hasGacha,
-    period: store?.startDate && store?.finishDate && store.startDate !== UNDECIDED_DATE
+    isPreReservation: !!store?.isPreReservation,
+    operationType: permanent ? 'PERMANENT' : 'LIMITED',
+    openDate: permanent && store?.startDate ? dayjs(store.startDate) : null,
+    closedDate: !store?.startDate ? (store?.finishDate || null) : null,
+    period: !permanent && store?.startDate && store?.finishDate && store.startDate !== UNDECIDED_DATE
       ? [dayjs(store.startDate), store.finishDate === UNDECIDED_DATE ? null : dayjs(store.finishDate)]
       : null,
     periodUndecided: store?.startDate === UNDECIDED_DATE,
@@ -639,56 +660,82 @@ const renderReorderableUploadItem = (fileList, setFileList, dragIndexRef) => (or
   );
 };
 
+const OPERATION_TYPE_OPTIONS = [
+  { label: '기간 한정', value: 'LIMITED' },
+  { label: '상시 운영', value: 'PERMANENT' },
+];
+
 const StorePeriodFields = () => {
   const form = Form.useFormInstance();
+  const operationType = Form.useWatch('operationType', form);
+  const closedDate = Form.useWatch('closedDate', form);
   const periodUndecided = Form.useWatch('periodUndecided', form);
   const finishUndecided = !!Form.useWatch('finishUndecided', form);
 
   return (
-    <Form.Item label="기간" extra="상시 운영이면 비워두세요. 일정이 정해지지 않았으면 미정을 체크해주세요.">
-      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+    <>
+      <Form.Item label="운영 방식" name="operationType" rules={[{ required: true, message: '운영 방식을 선택해주세요.' }]}>
+        <Radio.Group optionType="button" buttonStyle="solid" options={OPERATION_TYPE_OPTIONS} />
+      </Form.Item>
+      {/* 폐업일은 화면에서 안 고치고 그대로 돌려보냄 */}
+      <Form.Item name="closedDate" hidden><Input /></Form.Item>
+      {operationType === 'PERMANENT' ? (
         <Form.Item
-          name="period"
-          noStyle
-          dependencies={['periodUndecided', 'finishUndecided']}
-          rules={[({ getFieldValue }) => ({
-            validator(_, value) {
-              if (getFieldValue('periodUndecided')) return Promise.resolve();
-              if (getFieldValue('finishUndecided') && !value?.[0]) {
-                return Promise.reject(new Error('종료일 미정이면 시작일을 선택해주세요.'));
-              }
-              if (!getFieldValue('finishUndecided') && value?.[0] && !value?.[1]) {
-                return Promise.reject(new Error('종료일을 선택하거나 종료일 미정을 체크해주세요.'));
-              }
-              return Promise.resolve();
-            },
-          })]}
+          label="오픈일"
+          name="openDate"
+          extra={closedDate
+            ? `폐업 처리된 매장이에요 (폐업일 ${closedDate}).`
+            : '아직 오픈 전이면 오픈일을 넣어주세요. 이미 영업 중이면 비워두세요.'}
         >
-          <DatePicker.RangePicker
-            style={{ width: '100%' }}
-            format="YYYY-MM-DD"
-            disabled={periodUndecided || [false, finishUndecided]}
-            allowEmpty={[false, finishUndecided]}
-          />
+          <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
         </Form.Item>
-        <Space>
-          <Form.Item name="finishUndecided" valuePropName="checked" noStyle>
-            <Checkbox
-              disabled={periodUndecided}
-              onChange={(e) => {
-                const start = form.getFieldValue('period')?.[0];
-                if (e.target.checked) form.setFieldValue('period', start ? [start, null] : null);
-              }}
+      ) : (
+        <Form.Item label="기간" extra="일정이 정해지지 않았으면 미정을 체크해주세요.">
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Form.Item
+              name="period"
+              noStyle
+              dependencies={['periodUndecided', 'finishUndecided']}
+              rules={[({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (getFieldValue('periodUndecided')) return Promise.resolve();
+                  if (!value?.[0]) {
+                    return Promise.reject(new Error('시작일을 선택하거나 기간 미정을 체크해주세요.'));
+                  }
+                  if (!getFieldValue('finishUndecided') && value?.[0] && !value?.[1]) {
+                    return Promise.reject(new Error('종료일을 선택하거나 종료일 미정을 체크해주세요.'));
+                  }
+                  return Promise.resolve();
+                },
+              })]}
             >
-              종료일 미정
-            </Checkbox>
-          </Form.Item>
-          <Form.Item name="periodUndecided" valuePropName="checked" noStyle>
-            <Checkbox onChange={(e) => e.target.checked && form.setFieldValue('period', null)}>기간 미정</Checkbox>
-          </Form.Item>
-        </Space>
-      </Space>
-    </Form.Item>
+              <DatePicker.RangePicker
+                style={{ width: '100%' }}
+                format="YYYY-MM-DD"
+                disabled={periodUndecided || [false, finishUndecided]}
+                allowEmpty={[false, finishUndecided]}
+              />
+            </Form.Item>
+            <Space>
+              <Form.Item name="finishUndecided" valuePropName="checked" noStyle>
+                <Checkbox
+                  disabled={periodUndecided}
+                  onChange={(e) => {
+                    const start = form.getFieldValue('period')?.[0];
+                    if (e.target.checked) form.setFieldValue('period', start ? [start, null] : null);
+                  }}
+                >
+                  종료일 미정
+                </Checkbox>
+              </Form.Item>
+              <Form.Item name="periodUndecided" valuePropName="checked" noStyle>
+                <Checkbox onChange={(e) => e.target.checked && form.setFieldValue('period', null)}>기간 미정</Checkbox>
+              </Form.Item>
+            </Space>
+          </Space>
+        </Form.Item>
+      )}
+    </>
   );
 };
 
@@ -1147,6 +1194,7 @@ export default function Stores() {
       commonClose: '20:00',
       operationHours: WEEKDAYS.map(() => ({ isActive: true, open: '10:00', close: '20:00' })),
       operationDates: [],
+      operationType: 'LIMITED',
       hasGacha: true,
       keywords: [],
       links: [],
@@ -1538,8 +1586,7 @@ export default function Stores() {
       title: '행사 기간',
       key: 'period',
       width: 200,
-      render: (_, record) => (record.startDate && record.finishDate
-        ? formatStorePeriod(record.startDate, record.finishDate) : '-'),
+      render: (_, record) => formatStorePeriod(record.startDate, record.finishDate),
     },
     {
       title: '승인 상태',
@@ -1820,6 +1867,14 @@ export default function Stores() {
                     </Tag>
                   </div>
                 </div>
+                <div>
+                  <div className="store-detail-label">사전예약제</div>
+                  <div className="store-detail-value store-detail-value-box">
+                    <Tag color={detail.isPreReservation ? 'blue' : 'default'} style={{ marginInlineEnd: 0 }}>
+                      {detail.isPreReservation ? 'ON' : 'OFF'}
+                    </Tag>
+                  </div>
+                </div>
               </div>
 
               <Typography.Title className="store-detail-section-title" level={5}>위치</Typography.Title>
@@ -1965,6 +2020,9 @@ export default function Stores() {
             <Input.TextArea rows={4} maxLength={1000} showCount />
           </Form.Item>
           <Form.Item label="아이템 뽑기" name="hasGacha" valuePropName="checked">
+            <Switch checkedChildren="ON" unCheckedChildren="OFF" />
+          </Form.Item>
+          <Form.Item label="사전예약제" name="isPreReservation" valuePropName="checked" extra="사전예약한 사람만 입장할 수 있는 행사면 켜주세요.">
             <Switch checkedChildren="ON" unCheckedChildren="OFF" />
           </Form.Item>
           <Form.Item label="키워드">
@@ -2285,6 +2343,9 @@ export default function Stores() {
             <Input.TextArea rows={4} maxLength={1000} showCount />
           </Form.Item>
           <Form.Item label="아이템 뽑기" name="hasGacha" valuePropName="checked">
+            <Switch checkedChildren="ON" unCheckedChildren="OFF" />
+          </Form.Item>
+          <Form.Item label="사전예약제" name="isPreReservation" valuePropName="checked" extra="사전예약한 사람만 입장할 수 있는 행사면 켜주세요.">
             <Switch checkedChildren="ON" unCheckedChildren="OFF" />
           </Form.Item>
           <Form.Item label="키워드">
