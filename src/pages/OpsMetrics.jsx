@@ -6,6 +6,7 @@ import OperationsTab from './opsMetrics/OperationsTab';
 import ExploreTab from './opsMetrics/ExploreTab';
 import RegionsTab from './opsMetrics/RegionsTab';
 import EngagementTab from './opsMetrics/EngagementTab';
+import UsageTab from './opsMetrics/UsageTab';
 
 const TABS = [
   { key: 'supply', label: '공급', children: <SupplyTab /> },
@@ -14,6 +15,7 @@ const TABS = [
   { key: 'explore', label: '탐색', children: <ExploreTab /> },
   { key: 'regions', label: '지역', children: <RegionsTab /> },
   { key: 'engagement', label: '참여', children: <EngagementTab /> },
+  { key: 'usage', label: '체류 시간', children: <UsageTab /> },
 ];
 
 export default function OpsMetrics() {
