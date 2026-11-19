@@ -7,8 +7,8 @@
 //
 // 지표 기준
 //   - 이용 시간: userEngagementDuration (앱이 포그라운드였던 시간). averageSessionDuration 은 쓰지 않는다.
-//   - 랜딩 웹과 앱 dev·stg 빌드가 같은 GA 속성에 섞여 있어 운영 앱만 집계한다
-//     (platform != web, 스트림 이름이 -dev·-stg 로 끝나는 것 제외).
+//   - 랜딩 웹과 앱 dev·stg·prd(QA) 빌드가 같은 GA 속성에 섞여 있어 운영 앱만 집계한다
+//     (platform != web, 스트림 이름이 -dev·-stg·-prd 로 끝나는 것 제외).
 //   - 미복귀율: 기간 안에 첫 방문한 사용자 중 N일째 다시 오지 않은 비율. N일이 지나지 않은 첫 방문일은 뺀다.
 //     코호트를 한 요청에 여러 개 넣으면 GA 가 두 번째 코호트를 비워서 돌려주므로 하나씩 요청한다.
 
@@ -26,7 +26,7 @@ const PROD_APP_ONLY = {
       { notExpression: { filter: { fieldName: 'platform', stringFilter: { value: 'web' } } } },
       {
         notExpression: {
-          filter: { fieldName: 'streamName', stringFilter: { matchType: 'FULL_REGEXP', value: '.*-(dev|stg)' } },
+          filter: { fieldName: 'streamName', stringFilter: { matchType: 'FULL_REGEXP', value: '.*-(dev|stg|prd)' } },
         },
       },
     ],
