@@ -155,7 +155,7 @@ export default function UsageTab() {
             </SoftCard>
 
             <HintText style={{ marginTop: 16 }}>
-              GA4 기준 · 운영 앱(iOS·Android)만, 랜딩 웹·dev·stg 앱 제외 · 이용 시간은 앱이 화면에 떠 있던 시간(백그라운드 제외) ·
+              GA4 기준 · 운영 앱(iOS·Android)만, 랜딩 웹·dev·stg·prd(QA) 앱 제외 · 이용 시간은 앱이 화면에 떠 있던 시간(백그라운드 제외) ·
               미복귀율은 첫 방문 후 N일째 날 다시 오지 않은 비율
             </HintText>
           </>
