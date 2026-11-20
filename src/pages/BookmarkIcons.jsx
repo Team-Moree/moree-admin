@@ -5,6 +5,7 @@ import {
 import { PlusOutlined, EditOutlined, DeleteOutlined, InboxOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import client from '../api/client';
+import { uploadImages } from '../utils/imageUpload';
 
 const Header = styled.div`
   display: flex;
@@ -46,6 +47,10 @@ const IconId = styled(Typography.Text)`
 
 const PAGE_SIZE = 40;
 
+// 선택 아이콘은 맵핀 44x52pt 시안 4배율
+const DEFAULT_ICON_WIDTH = 96;
+const DEFAULT_FOCUSED_ICON_WIDTH = 176;
+
 export default function BookmarkIcons() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -58,12 +63,14 @@ export default function BookmarkIcons() {
   const [createForm] = Form.useForm();
   const [creating, setCreating] = useState(false);
   const [fileList, setFileList] = useState([]);
+  const [focusedFileList, setFocusedFileList] = useState([]);
 
   // 수정 모달
   const [editOpen, setEditOpen] = useState(false);
   const [editForm] = Form.useForm();
   const [editing, setEditing] = useState(false);
   const [editFileList, setEditFileList] = useState([]);
+  const [editFocusedFileList, setEditFocusedFileList] = useState([]);
   const [editTarget, setEditTarget] = useState(null);
 
   const { notification } = App.useApp();
@@ -102,28 +109,24 @@ export default function BookmarkIcons() {
   const handleCreate = async () => {
     try {
       await createForm.validateFields();
-      if (fileList.length === 0) {
-        notification.warning({ message: '이미지를 선택해주세요' });
+      if (fileList.length === 0 || focusedFileList.length === 0) {
+        notification.warning({ message: '기본 아이콘과 선택 아이콘을 모두 선택해주세요' });
         return;
       }
       setCreating(true);
 
-      const formData = new FormData();
-      formData.append('image', fileList[0].originFileObj);
-
-      const width = createForm.getFieldValue('width');
-      if (width) {
-        formData.append('width', width);
-      }
-
-      await client.post('/admin/bookmark/icon', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const [iconUrl, focusedIconUrl] = await uploadImages(
+        [fileList[0].originFileObj, focusedFileList[0].originFileObj],
+        'BOOKMARK_ICON',
+        { maxWidth: [createForm.getFieldValue('width') || DEFAULT_ICON_WIDTH, DEFAULT_FOCUSED_ICON_WIDTH] },
+      );
+      await client.post('/admin/bookmark/icon', { iconUrl, focusedIconUrl });
 
       notification.success({ message: '아이콘 추가 완료', description: '새 북마크 아이콘이 등록되었습니다.' });
       setCreateOpen(false);
       createForm.resetFields();
       setFileList([]);
+      setFocusedFileList([]);
       fetchData();
     } catch (err) {
       if (err.errorFields) return;
@@ -138,6 +141,7 @@ export default function BookmarkIcons() {
   const handleEditOpen = (icon) => {
     setEditTarget(icon);
     setEditFileList([]);
+    setEditFocusedFileList([]);
     editForm.resetFields();
     setEditOpen(true);
   };
@@ -145,28 +149,27 @@ export default function BookmarkIcons() {
   const handleEdit = async () => {
     try {
       await editForm.validateFields();
-      if (editFileList.length === 0) {
-        notification.warning({ message: '이미지를 선택해주세요' });
+      if (editFileList.length === 0 && editFocusedFileList.length === 0) {
+        notification.warning({ message: '바꿀 아이콘을 하나 이상 선택해주세요' });
         return;
       }
       setEditing(true);
 
-      const formData = new FormData();
-      formData.append('image', editFileList[0].originFileObj);
-
-      const width = editForm.getFieldValue('width');
-      if (width) {
-        formData.append('width', width);
-      }
-
-      await client.put(`/admin/bookmark/icon/${editTarget.id}`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      // 바꾸는 아이콘만 올리고, 안 바꾼 쪽은 undefined로 남겨 서버가 기존 값을 유지
+      const targets = [
+        [editFileList[0], editForm.getFieldValue('width') || DEFAULT_ICON_WIDTH],
+        [editFocusedFileList[0], DEFAULT_FOCUSED_ICON_WIDTH],
+      ];
+      const picked = targets.filter(([file]) => file);
+      const uploaded = await uploadImages(picked.map(([file]) => file.originFileObj), 'BOOKMARK_ICON', { maxWidth: picked.map(([, w]) => w) });
+      const [iconUrl, focusedIconUrl] = targets.map(([file]) => (file ? uploaded.shift() : undefined));
+      await client.put(`/admin/bookmark/icon/${editTarget.id}`, { iconUrl, focusedIconUrl });
 
       notification.success({ message: '수정 완료', description: '아이콘이 수정되었습니다.' });
       setEditOpen(false);
       editForm.resetFields();
       setEditFileList([]);
+      setEditFocusedFileList([]);
       setEditTarget(null);
       fetchData();
     } catch (err) {
@@ -182,6 +185,7 @@ export default function BookmarkIcons() {
     setEditOpen(false);
     editForm.resetFields();
     setEditFileList([]);
+    setEditFocusedFileList([]);
     setEditTarget(null);
   };
 
@@ -189,6 +193,7 @@ export default function BookmarkIcons() {
     setCreateOpen(false);
     createForm.resetFields();
     setFileList([]);
+    setFocusedFileList([]);
   };
 
   if (error && data.length === 0) {
@@ -279,7 +284,26 @@ export default function BookmarkIcons() {
                 <InboxOutlined />
               </p>
               <p className="ant-upload-text">클릭하거나 이미지를 드래그하여 업로드</p>
-              <p className="ant-upload-hint">PNG, JPG, SVG 등 이미지 파일을 지원합니다</p>
+              <p className="ant-upload-hint">PNG, JPG, WEBP 이미지를 지원합니다</p>
+            </Upload.Dragger>
+          </Form.Item>
+          <Form.Item
+            label="선택 아이콘 이미지"
+            required
+            extra="맵핀이 선택됐을 때 보이는 아이콘 (176px로 리사이즈)"
+          >
+            <Upload.Dragger
+              accept="image/*"
+              maxCount={1}
+              fileList={focusedFileList}
+              beforeUpload={() => false}
+              onChange={({ fileList: newFileList }) => setFocusedFileList(newFileList)}
+              listType="picture"
+            >
+              <p className="ant-upload-drag-icon">
+                <InboxOutlined />
+              </p>
+              <p className="ant-upload-text">클릭하거나 이미지를 드래그하여 업로드</p>
             </Upload.Dragger>
           </Form.Item>
           <Form.Item
@@ -317,8 +341,7 @@ export default function BookmarkIcons() {
         )}
         <Form form={editForm} layout="vertical">
           <Form.Item
-            label="새 아이콘 이미지"
-            required
+            label="새 기본 아이콘 이미지"
           >
             <Upload.Dragger
               accept="image/*"
@@ -332,7 +355,25 @@ export default function BookmarkIcons() {
                 <InboxOutlined />
               </p>
               <p className="ant-upload-text">클릭하거나 이미지를 드래그하여 업로드</p>
-              <p className="ant-upload-hint">PNG, JPG, SVG 등 이미지 파일을 지원합니다</p>
+              <p className="ant-upload-hint">PNG, JPG, WEBP 이미지를 지원합니다</p>
+            </Upload.Dragger>
+          </Form.Item>
+          <Form.Item
+            label="새 선택 아이콘 이미지"
+            extra="맵핀이 선택됐을 때 보이는 아이콘 (176px로 리사이즈)"
+          >
+            <Upload.Dragger
+              accept="image/*"
+              maxCount={1}
+              fileList={editFocusedFileList}
+              beforeUpload={() => false}
+              onChange={({ fileList: newFileList }) => setEditFocusedFileList(newFileList)}
+              listType="picture"
+            >
+              <p className="ant-upload-drag-icon">
+                <InboxOutlined />
+              </p>
+              <p className="ant-upload-text">클릭하거나 이미지를 드래그하여 업로드</p>
             </Upload.Dragger>
           </Form.Item>
           <Form.Item

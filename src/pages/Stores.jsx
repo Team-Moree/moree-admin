@@ -7,6 +7,7 @@ import client from '../api/client';
 import GoogleAddressSearchModal from '../components/GoogleAddressSearchModal';
 import StoreMap from '../components/StoreMap';
 import { parsePagedResponse } from '../utils/pagedList';
+import { uploadImages } from '../utils/imageUpload';
 
 const Header = styled.div`
   display: flex;
@@ -432,15 +433,6 @@ const HiddenBooleanField = () => null;
 
 const isOperationDayActive = (hour) => hour?.isActive !== false && hour?.isActive !== 'false';
 
-const getUploadedImageUrl = (data) => (
-  data?.imageUrl
-  || data?.url
-  || data?.result?.imageUrl
-  || data?.result?.url
-  || data?.results?.[0]?.imageUrl
-  || data?.results?.[0]?.url
-  || data?.imageUrls?.[0]
-);
 
 const buildOperationHours = (values) => {
   if (values.operationHoursUndecided) return [];
@@ -1359,30 +1351,9 @@ export default function Stores() {
   };
 
   const uploadStoreImages = async (fileList) => {
-    const imageUrls = [];
-
-    for (const file of fileList) {
-      if (file.url) {
-        imageUrls.push(file.url);
-        continue;
-      }
-
-      const formData = new FormData();
-      formData.append('images', file.originFileObj);
-
-      const res = await client.post('/shared/upload-image', formData, {
-        params: { imageType: 'STORE' },
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      const imageUrl = getUploadedImageUrl(res.data);
-
-      if (!imageUrl) {
-        throw new Error('이미지 업로드 응답에서 URL을 찾을 수 없습니다.');
-      }
-      imageUrls.push(imageUrl);
-    }
-
-    return imageUrls;
+    const newFiles = fileList.filter((file) => !file.url).map((file) => file.originFileObj);
+    const uploadedUrls = await uploadImages(newFiles, 'STORE');
+    return fileList.map((file) => file.url ?? uploadedUrls.shift());
   };
 
   const handleCreateSubmit = async () => {
