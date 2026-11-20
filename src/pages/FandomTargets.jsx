@@ -8,6 +8,7 @@ import {
 } from '@ant-design/icons';
 import styled from 'styled-components';
 import client from '../api/client';
+import { uploadImages } from '../utils/imageUpload';
 
 const Header = styled.div`
   display: flex;
@@ -49,6 +50,8 @@ const CATEGORY_COLORS = {
   DRAMA_MOVIE: 'red',
   ETC: 'default',
 };
+
+const FANDOM_IMAGE_WIDTH = 512;
 
 export default function FandomTargets() {
   const [data, setData] = useState([]);
@@ -205,7 +208,6 @@ export default function FandomTargets() {
     setCreateOpen(true);
   };
 
-  // 추가는 multipart 다. request 파트는 JSON, image 파트는 선택이다.
   // 작품(WORK)은 그 자체가 소스라 소스를 보내지 않는다 — 함께 보내면 서버가 400 으로 거절한다.
   const handleCreate = async () => {
     try {
@@ -222,15 +224,10 @@ export default function FandomTargets() {
       const source = values.source?.trim();
       if (!isWork && source) request.source = source;
 
-      const formData = new FormData();
-      formData.append('request', new Blob([JSON.stringify(request)], { type: 'application/json' }));
       if (createFileList.length > 0) {
-        formData.append('image', createFileList[0].originFileObj);
+        [request.imageUrl] = await uploadImages([createFileList[0].originFileObj], 'FANDOM', { maxWidth: FANDOM_IMAGE_WIDTH });
       }
-
-      await client.post('/admin/fandom-target', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      await client.post('/admin/fandom-target', request);
 
       notification.success({ message: '추가 완료', description: '덕질 대상이 등록되었습니다.' });
       setCreateOpen(false);

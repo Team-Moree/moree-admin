@@ -6,6 +6,7 @@ import {
 import { EditOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import styled from 'styled-components';
 import client from '../api/client';
+import { uploadImages } from '../utils/imageUpload';
 
 const Header = styled.div`
   display: flex;
@@ -43,6 +44,12 @@ const CATEGORY_COLORS = {
 const CATEGORY_LABEL = Object.fromEntries(CATEGORY_OPTIONS.map((o) => [o.value, o.label]));
 
 const PAGE_SIZE = 20;
+
+// 상세 512px, 미니 128px
+const uploadMoreeImages = async (file) => {
+  const [imageUrl, miniImageUrl] = await uploadImages([file, file], 'MOREE', { maxWidth: [512, 128] });
+  return { imageUrl, miniImageUrl };
+};
 
 export default function Morees() {
   const [data, setData] = useState([]);
@@ -105,17 +112,14 @@ export default function Morees() {
       }
       setCreating(true);
 
-      const formData = new FormData();
-      formData.append('image', createFileList[0].originFileObj);
-      formData.append('request', new Blob([JSON.stringify({
+      const { imageUrl, miniImageUrl } = await uploadMoreeImages(createFileList[0].originFileObj);
+      await client.post('/admin/moree', {
         name: values.name,
         acquireMessage: values.acquireMessage,
         speechMessage: values.speechMessage,
         category: values.category,
-      })], { type: 'application/json' }));
-
-      await client.post('/admin/moree', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+        imageUrl,
+        miniImageUrl,
       });
 
       notification.success({ message: '모리 추가 완료', description: '새 모리가 등록되었습니다.' });
@@ -165,15 +169,8 @@ export default function Morees() {
         return;
       }
 
-      const formData = new FormData();
-      if (hasNewImage) {
-        formData.append('image', editFileList[0].originFileObj);
-      }
-      formData.append('request', new Blob([JSON.stringify(requestBody)], { type: 'application/json' }));
-
-      await client.patch(`/admin/moree/${editTarget.moreeId}`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const imageUrls = hasNewImage ? await uploadMoreeImages(editFileList[0].originFileObj) : {};
+      await client.patch(`/admin/moree/${editTarget.moreeId}`, { ...requestBody, ...imageUrls });
 
       notification.success({ message: '수정 완료', description: '모리 정보가 수정되었습니다.' });
       setEditTarget(null);
