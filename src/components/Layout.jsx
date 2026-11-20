@@ -19,6 +19,7 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   MobileOutlined,
+  EnvironmentOutlined,
 } from '@ant-design/icons';
 import styled from 'styled-components';
 import EnvBadge from './EnvBadge';
@@ -61,6 +62,7 @@ const menuItems = [
   { key: '/fandom-targets', icon: <AimOutlined />, label: '팬덤 타겟' },
   { key: '/stores', icon: <ShopOutlined />, label: '스토어' },
   { key: '/store-reports', icon: <WarningOutlined />, label: '스토어 신고/수정' },
+  { key: '/regions', icon: <EnvironmentOutlined />, label: '탐험 지역' },
   { key: '/review-reports', icon: <CommentOutlined />, label: '리뷰 신고' },
   { key: '/users', icon: <UserOutlined />, label: '유저' },
   { key: '/morees', icon: <SmileOutlined />, label: '모리' },

@@ -16,6 +16,7 @@ import Morees from './pages/Morees';
 import BookmarkIcons from './pages/BookmarkIcons';
 import Notifications from './pages/Notifications';
 import AppNotices from './pages/AppNotices';
+import Regions from './pages/Regions';
 
 function PrivateRoute({ children }) {
   const token = sessionStorage.getItem('masterToken');
@@ -47,6 +48,7 @@ export default function App() {
                   <Route path="/bookmark-icons" element={<BookmarkIcons />} />
                   <Route path="/notifications" element={<Notifications />} />
                   <Route path="/app-notices" element={<AppNotices />} />
+                  <Route path="/regions" element={<Regions />} />
                 </Routes>
               </ErrorBoundary>
             </Layout>
