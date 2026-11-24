@@ -12,107 +12,27 @@
 //   - 미복귀율: 기간 안에 첫 방문한 사용자 중 N일째 다시 오지 않은 비율. N일이 지나지 않은 첫 방문일은 뺀다.
 //     코호트를 한 요청에 여러 개 넣으면 GA 가 두 번째 코호트를 비워서 돌려주므로 하나씩 요청한다.
 
-import pkg from '@google-analytics/data';
+import {
+  assertAuthorized,
+  readGaConfig,
+  getClient,
+  resolveRange,
+  addDays,
+  perUnit,
+  round1,
+  inList,
+  exact,
+  report,
+  optionalReport,
+  sendError,
+} from './_lib.js';
 
-const { BetaAnalyticsDataClient } = pkg;
+export { resolveRange };
 
-const MAX_DAYS = 92;
-const DEFAULT_DAYS = 28;
 const RETURN_DAYS = [7, 30];
 const SCREEN_LIMIT = 50;
 const EXPLORATION_SCREENS = ['exploration', 'store_list', 'store_search', 'gacha_list'];
 const ENTRANCE_VALUES = ['1', 'true'];
-const PROD_APP_ONLY = {
-  andGroup: {
-    expressions: [
-      { notExpression: { filter: { fieldName: 'platform', stringFilter: { value: 'web' } } } },
-      {
-        notExpression: {
-          filter: { fieldName: 'streamName', stringFilter: { matchType: 'FULL_REGEXP', value: '.*-(dev|stg|prd)' } },
-        },
-      },
-    ],
-  },
-};
-
-class HttpError extends Error {
-  constructor(status, code, message) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
-
-function assertAuthorized(req) {
-  const raw = req.headers['authorization'] || req.headers['Authorization'];
-  const ok = typeof raw === 'string' && /^Bearer\s+\S+/i.test(raw.trim());
-  if (!ok) throw new HttpError(401, 'MISSING_TOKEN', '인증 토큰이 없습니다.');
-}
-
-function readGaConfig() {
-  const propertyId = process.env.GA4_PROPERTY_ID;
-  const clientEmail = process.env.GA_CLIENT_EMAIL;
-  const privateKey = process.env.GA_PRIVATE_KEY;
-  if (!propertyId || !clientEmail || !privateKey) {
-    throw new HttpError(
-      503,
-      'GA_NOT_CONFIGURED',
-      'GA4 환경변수(GA4_PROPERTY_ID / GA_CLIENT_EMAIL / GA_PRIVATE_KEY)가 설정되지 않았습니다.'
-    );
-  }
-  return { propertyId, clientEmail, privateKey: privateKey.replace(/\\n/g, '\n') };
-}
-
-let cachedClient = null;
-function getClient({ clientEmail, privateKey }) {
-  if (!cachedClient) {
-    cachedClient = new BetaAnalyticsDataClient({
-      credentials: { client_email: clientEmail, private_key: privateKey },
-    });
-  }
-  return cachedClient;
-}
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const toDate = (s) => new Date(`${s}T00:00:00Z`);
-const fmt = (d) => d.toISOString().slice(0, 10);
-const addDays = (s, n) => {
-  const d = toDate(s);
-  d.setUTCDate(d.getUTCDate() + n);
-  return fmt(d);
-};
-const daysBetween = (a, b) => Math.round((toDate(b) - toDate(a)) / 86400000);
-const todayInSeoul = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
-
-export function resolveRange(query, today = todayInSeoul()) {
-  const to = query?.to ?? addDays(today, -1);
-  const from = query?.from ?? addDays(to, -(DEFAULT_DAYS - 1));
-  if (!DATE_RE.test(from) || !DATE_RE.test(to)) {
-    throw new HttpError(400, 'INVALID_INPUT', '날짜는 YYYY-MM-DD 형식이어야 합니다.');
-  }
-  if (from > to || to >= today || daysBetween(from, to) + 1 > MAX_DAYS) {
-    throw new HttpError(400, 'INVALID_INPUT', `기간은 어제까지, 최대 ${MAX_DAYS}일입니다.`);
-  }
-  return { from, to, today };
-}
-
-function records(report) {
-  const dims = (report?.dimensionHeaders || []).map((h) => h.name);
-  const mets = (report?.metricHeaders || []).map((h) => h.name);
-  return (report?.rows || []).map((row) => {
-    const out = {};
-    dims.forEach((name, i) => {
-      out[name] = row.dimensionValues?.[i]?.value ?? '';
-    });
-    mets.forEach((name, i) => {
-      out[name] = Number(row.metricValues?.[i]?.value ?? 0);
-    });
-    return out;
-  });
-}
-
-const round1 = (v) => Math.round(v * 10) / 10;
-const perUnit = (seconds, count) => (count > 0 ? round1(seconds / count) : 0);
 
 export function buildDaily(rows, from, to) {
   const byDate = new Map(rows.map((r) => [`${r.date.slice(0, 4)}-${r.date.slice(4, 6)}-${r.date.slice(6, 8)}`, r]));
@@ -146,9 +66,6 @@ export function buildSummary(total, daily) {
     avgSecondsPerSession: perUnit(seconds, sessions),
   };
 }
-
-const inList = (fieldName, values) => ({ filter: { fieldName, inListFilter: { values } } });
-const exact = (fieldName, value) => ({ filter: { fieldName, stringFilter: { value } } });
 
 function screenStats(r, entrances) {
   return {
@@ -191,25 +108,19 @@ export function buildNonReturn(rows, day, cohortFrom, cohortTo) {
   };
 }
 
-async function report(client, property, { filters = [], ...request }) {
-  const dimensionFilter = { andGroup: { expressions: [...PROD_APP_ONLY.andGroup.expressions, ...filters] } };
-  const [resp] = await client.runReport({ property, dimensionFilter, ...request });
-  return records(resp);
-}
-
 async function entrancesByScreen(client, property, dateRanges) {
-  try {
-    return await report(client, property, {
+  return optionalReport(
+    client,
+    property,
+    {
       dateRanges,
       dimensions: [{ name: 'unifiedScreenName' }],
       metrics: [{ name: 'eventCount' }],
       filters: [exact('eventName', 'screen_view'), inList('customEvent:is_entrance', ENTRANCE_VALUES)],
       limit: SCREEN_LIMIT * 2,
-    });
-  } catch (e) {
-    console.warn('[ga/usage-time] 진입 수 조회 실패 (is_entrance 맞춤 측정기준 확인)', e?.details || e?.message);
-    return null;
-  }
+    },
+    '진입 수'
+  );
 }
 
 async function nonReturn(client, property, { from, to, today }) {
@@ -279,8 +190,6 @@ export default async function handler(req, res) {
       nonReturn: nonReturnRates,
     });
   } catch (e) {
-    if (e instanceof HttpError) return res.status(e.status).json({ code: e.code, message: e.message });
-    console.error('[ga/usage-time] GA 조회 실패', e);
-    return res.status(502).json({ code: 'GA_REPORT_FAILED', message: e?.details || e?.message || 'GA 데이터 조회에 실패했습니다.' });
+    return sendError(res, e, 'usage-time');
   }
 }

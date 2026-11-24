@@ -11,3 +11,7 @@ gaClient.interceptors.request.use((config) => {
 export function fetchUsageTime({ from, to } = {}) {
   return gaClient.get('/usage-time', { params: { from, to } }).then((res) => res.data);
 }
+
+export function fetchAppScreens({ from, to } = {}) {
+  return gaClient.get('/app-screens', { params: { from, to } }).then((res) => res.data);
+}

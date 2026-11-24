@@ -21,7 +21,7 @@ const { RangePicker } = DatePicker;
 
 const MAX_DAYS = 92;
 const EXPLORATION_ROW_KEY = '__exploration__';
-const SCREEN_LABELS = {
+export const SCREEN_LABELS = {
   exploration: '탐험 탭 (1.3.x 이하)',
   store_list: '탐험 행사 목록',
   store_search: '탐험 검색',
