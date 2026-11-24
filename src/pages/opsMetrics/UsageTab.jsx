@@ -20,7 +20,23 @@ const { Text } = Typography;
 const { RangePicker } = DatePicker;
 
 const MAX_DAYS = 92;
-const SCREEN_LABELS = { exploration: '탐색(홈)', store_detail: '행사 상세' };
+const EXPLORATION_ROW_KEY = '__exploration__';
+const SCREEN_LABELS = {
+  exploration: '탐험 탭 (1.3.x 이하)',
+  store_list: '탐험 행사 목록',
+  store_search: '탐험 검색',
+  gacha_list: '탐험 가챠 목록',
+  store_detail: '행사 상세',
+  gacha_draw: '가챠 뽑기',
+  gacha_draw_result: '가챠 뽑기 결과',
+  webview: '웹뷰 (종류 미상)',
+  webview_instagram: '웹뷰 인스타그램',
+  webview_x: '웹뷰 X',
+  webview_homepage: '웹뷰 홈페이지',
+  webview_reservation: '웹뷰 예약',
+  webview_ticket: '웹뷰 티켓 예매',
+  webview_other: '웹뷰 기타',
+};
 
 export function formatDuration(seconds) {
   if (seconds == null) return '-';
@@ -78,13 +94,27 @@ export default function UsageTab() {
     perSessionMin: Math.round((d.secondsPerSession / 60) * 10) / 10,
   }));
 
+  const entranceAvailable = Boolean(data?.entranceAvailable);
+  const screenRows = data
+    ? [
+        ...(data.exploration?.views ? [{ ...data.exploration, screenName: EXPLORATION_ROW_KEY }] : []),
+        ...data.screens,
+      ]
+    : [];
+
   const columns = [
     {
       title: '화면',
       dataIndex: 'screenName',
-      render: (n) => (SCREEN_LABELS[n] ? `${SCREEN_LABELS[n]} (${n})` : n),
+      render: (n) => {
+        if (n === EXPLORATION_ROW_KEY) return <Text strong>탐험 탭 합계 (상세 제외)</Text>;
+        return SCREEN_LABELS[n] ? `${SCREEN_LABELS[n]} (${n})` : n;
+      },
     },
     { title: '조회수', dataIndex: 'views', align: 'right', render: formatNumber },
+    ...(entranceAvailable
+      ? [{ title: '진입 수', dataIndex: 'entrances', align: 'right', render: (v) => (v == null ? '-' : formatNumber(v)) }]
+      : []),
     { title: '사용자', dataIndex: 'users', align: 'right', render: formatNumber },
     { title: '조회당 평균', dataIndex: 'secondsPerView', align: 'right', render: formatDuration },
     { title: '사용자당 평균', dataIndex: 'secondsPerUser', align: 'right', render: formatDuration },
@@ -150,8 +180,14 @@ export default function UsageTab() {
             </SoftCard>
 
             <SoftCard title="화면별 체류 시간" style={{ marginTop: 16, height: 'auto' }}>
-              <Table columns={columns} dataSource={data.screens} rowKey="screenName" pagination={false} size="small" />
-              <HintText>행사별 상세 체류 시간은 앱이 screen_view 에 store_id 를 보내야 볼 수 있음</HintText>
+              <Table columns={columns} dataSource={screenRows} rowKey="screenName" pagination={false} size="small" />
+              <HintText>
+                조회수는 다른 화면을 닫고 돌아온 복귀까지 포함(앱 1.4.0~) ·{' '}
+                {entranceAvailable
+                  ? '진입 수는 새로 연 경우(is_entrance=1)만, 1.4.0 이전 데이터는 0'
+                  : '진입 수는 GA4 맞춤 측정기준 is_entrance 등록 후 표시'}{' '}
+                · 탐험 탭 합계는 exploration(1.3.x)과 store_list·store_search·gacha_list(1.4.0~)를 합친 값
+              </HintText>
             </SoftCard>
 
             <HintText style={{ marginTop: 16 }}>

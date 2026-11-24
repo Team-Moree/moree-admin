@@ -20,6 +20,8 @@ const MAX_DAYS = 92;
 const DEFAULT_DAYS = 28;
 const RETURN_DAYS = [7, 30];
 const SCREEN_LIMIT = 50;
+const EXPLORATION_SCREENS = ['exploration', 'store_list', 'store_search', 'gacha_list'];
+const ENTRANCE_VALUES = ['1', 'true'];
 const PROD_APP_ONLY = {
   andGroup: {
     expressions: [
@@ -145,17 +147,35 @@ export function buildSummary(total, daily) {
   };
 }
 
-export function buildScreens(rows) {
+const inList = (fieldName, values) => ({ filter: { fieldName, inListFilter: { values } } });
+const exact = (fieldName, value) => ({ filter: { fieldName, stringFilter: { value } } });
+
+function screenStats(r, entrances) {
+  return {
+    views: r?.screenPageViews || 0,
+    entrances,
+    users: r?.activeUsers || 0,
+    engagementSeconds: Math.round(r?.userEngagementDuration || 0),
+    secondsPerView: perUnit(r?.userEngagementDuration || 0, r?.screenPageViews || 0),
+    secondsPerUser: perUnit(r?.userEngagementDuration || 0, r?.activeUsers || 0),
+  };
+}
+
+export function buildScreens(rows, entranceRows = null) {
+  const entrances = entranceRows && new Map(entranceRows.map((r) => [r.unifiedScreenName, r.eventCount]));
   return rows
     .filter((r) => r.unifiedScreenName && r.unifiedScreenName !== '(not set)')
     .map((r) => ({
       screenName: r.unifiedScreenName,
-      views: r.screenPageViews,
-      users: r.activeUsers,
-      engagementSeconds: Math.round(r.userEngagementDuration),
-      secondsPerView: perUnit(r.userEngagementDuration, r.screenPageViews),
-      secondsPerUser: perUnit(r.userEngagementDuration, r.activeUsers),
+      ...screenStats(r, entrances ? entrances.get(r.unifiedScreenName) || 0 : null),
     }));
+}
+
+export function buildExploration(total, entranceRows = null) {
+  const entrances = entranceRows
+    ? entranceRows.filter((r) => EXPLORATION_SCREENS.includes(r.unifiedScreenName)).reduce((sum, r) => sum + r.eventCount, 0)
+    : null;
+  return { screenNames: EXPLORATION_SCREENS, ...screenStats(total, entrances) };
 }
 
 export function buildNonReturn(rows, day, cohortFrom, cohortTo) {
@@ -171,9 +191,25 @@ export function buildNonReturn(rows, day, cohortFrom, cohortTo) {
   };
 }
 
-async function report(client, property, request) {
-  const [resp] = await client.runReport({ property, dimensionFilter: PROD_APP_ONLY, ...request });
+async function report(client, property, { filters = [], ...request }) {
+  const dimensionFilter = { andGroup: { expressions: [...PROD_APP_ONLY.andGroup.expressions, ...filters] } };
+  const [resp] = await client.runReport({ property, dimensionFilter, ...request });
   return records(resp);
+}
+
+async function entrancesByScreen(client, property, dateRanges) {
+  try {
+    return await report(client, property, {
+      dateRanges,
+      dimensions: [{ name: 'unifiedScreenName' }],
+      metrics: [{ name: 'eventCount' }],
+      filters: [exact('eventName', 'screen_view'), inList('customEvent:is_entrance', ENTRANCE_VALUES)],
+      limit: SCREEN_LIMIT * 2,
+    });
+  } catch (e) {
+    console.warn('[ga/usage-time] 진입 수 조회 실패 (is_entrance 맞춤 측정기준 확인)', e?.details || e?.message);
+    return null;
+  }
 }
 
 async function nonReturn(client, property, { from, to, today }) {
@@ -210,16 +246,23 @@ export default async function handler(req, res) {
     const dateRanges = [{ startDate: range.from, endDate: range.to }];
     const usageMetrics = [{ name: 'activeUsers' }, { name: 'sessions' }, { name: 'userEngagementDuration' }];
 
-    const [totalRows, dailyRows, screenRows, nonReturnRates] = await Promise.all([
+    const screenMetrics = [{ name: 'screenPageViews' }, { name: 'activeUsers' }, { name: 'userEngagementDuration' }];
+    const [totalRows, dailyRows, screenRows, explorationRows, entranceRows, nonReturnRates] = await Promise.all([
       report(client, property, { dateRanges, metrics: usageMetrics }),
       report(client, property, { dateRanges, metrics: usageMetrics, dimensions: [{ name: 'date' }] }),
       report(client, property, {
         dateRanges,
         dimensions: [{ name: 'unifiedScreenName' }],
-        metrics: [{ name: 'screenPageViews' }, { name: 'activeUsers' }, { name: 'userEngagementDuration' }],
+        metrics: screenMetrics,
         orderBys: [{ metric: { metricName: 'screenPageViews' }, desc: true }],
         limit: SCREEN_LIMIT,
       }),
+      report(client, property, {
+        dateRanges,
+        metrics: screenMetrics,
+        filters: [inList('unifiedScreenName', EXPLORATION_SCREENS)],
+      }),
+      entrancesByScreen(client, property, dateRanges),
       nonReturn(client, property, range),
     ]);
 
@@ -230,7 +273,9 @@ export default async function handler(req, res) {
       to: range.to,
       summary: buildSummary(totalRows[0], daily),
       daily,
-      screens: buildScreens(screenRows),
+      screens: buildScreens(screenRows, entranceRows),
+      exploration: buildExploration(explorationRows[0], entranceRows),
+      entranceAvailable: entranceRows !== null,
       nonReturn: nonReturnRates,
     });
   } catch (e) {
