@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { Row, Col, Statistic, Table, Spin, Typography, DatePicker } from 'antd';
+import { Row, Col, Statistic, Spin, Typography, DatePicker } from 'antd';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import dayjs from 'dayjs';
 import { fetchUsageTime } from '../../api/ga';
@@ -15,6 +15,7 @@ import {
   formatNumber,
   useRemote,
 } from './ui';
+import { HBarChart, ChartOrTable, SERIES_COLORS } from './charts';
 
 const { Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -36,6 +37,21 @@ export const SCREEN_LABELS = {
   webview_reservation: '웹뷰 예약',
   webview_ticket: '웹뷰 티켓 예매',
   webview_other: '웹뷰 기타',
+  splash: '스플래시',
+  intro: '인트로',
+  login: '로그인',
+  moree_pedia: '도감',
+  my_home: '마이홈',
+  user_home: '타인 홈',
+  follow: '팔로우',
+  stamp: '발도장',
+  profile_edit: '프로필 수정',
+  image_viewer: '이미지 뷰어',
+  review: '리뷰 작성',
+  bookmark: '북마크 폴더 선택',
+  bookmark_folder: '북마크 폴더',
+  bookmark_folder_form: '북마크 폴더 편집',
+  settings: '설정',
 };
 
 export function formatDuration(seconds) {
@@ -101,6 +117,16 @@ export default function UsageTab() {
         ...data.screens,
       ]
     : [];
+
+  const SCREEN_CHART_LIMIT = 15;
+  const screenChart = screenRows.slice(0, SCREEN_CHART_LIMIT).map((r) => ({
+    ...r,
+    name: r.screenName === EXPLORATION_ROW_KEY ? '탐험 탭 합계' : SCREEN_LABELS[r.screenName] || r.screenName,
+  }));
+  const viewSeries = [
+    { key: 'views', name: '조회(복귀 포함)', color: SERIES_COLORS[2] },
+    ...(entranceAvailable ? [{ key: 'entrances', name: '진입', color: SERIES_COLORS[0] }] : []),
+  ];
 
   const columns = [
     {
@@ -180,7 +206,31 @@ export default function UsageTab() {
             </SoftCard>
 
             <SoftCard title="화면별 체류 시간" style={{ marginTop: 16, height: 'auto' }}>
-              <Table columns={columns} dataSource={screenRows} rowKey="screenName" pagination={false} size="small" />
+              <ChartOrTable
+                columns={columns}
+                dataSource={screenRows}
+                rowKey="screenName"
+                chart={
+                  <Row gutter={[16, 16]}>
+                    <Col xs={24} lg={13}>
+                      <Text strong>조회 수 TOP {SCREEN_CHART_LIMIT}</Text>
+                      <HBarChart data={screenChart} categoryKey="name" series={viewSeries} formatValue={formatNumber} />
+                    </Col>
+                    <Col xs={24} lg={11}>
+                      <Text strong>조회당 평균 체류</Text>
+                      <HBarChart
+                        data={screenChart}
+                        categoryKey="name"
+                        series={[{ key: 'secondsPerView', name: '조회당 체류', color: SERIES_COLORS[3] }]}
+                        formatValue={formatDuration}
+                        label={{ key: 'secondsPerView', format: formatDuration }}
+                        tooltipExtra={(r) => `사용자당 ${formatDuration(r.secondsPerUser)}`}
+                        categoryWidth={120}
+                      />
+                    </Col>
+                  </Row>
+                }
+              />
               <HintText>
                 조회수는 다른 화면을 닫고 돌아온 복귀까지 포함(앱 1.4.0~) ·{' '}
                 {entranceAvailable
