@@ -30,9 +30,10 @@ const WEBVIEW_TYPES = [
   { key: 'webview_instagram', name: '인스타그램', color: SERIES_COLORS[0] },
   { key: 'webview_x', name: 'X', color: SERIES_COLORS[1] },
   { key: 'webview_homepage', name: '홈페이지', color: SERIES_COLORS[2] },
-  { key: 'webview_reservation', name: '예약', color: SERIES_COLORS[3] },
-  { key: 'webview_ticket', name: '티켓', color: SERIES_COLORS[4] },
-  { key: 'webview_other', name: '기타', color: SERIES_COLORS[5] },
+  { key: 'webview_pre_reservation', name: '사전예약', color: SERIES_COLORS[3] },
+  { key: 'webview_community', name: '커뮤니티', color: SERIES_COLORS[4] },
+  { key: 'webview_open_chat', name: '오픈채팅', color: SERIES_COLORS[5] },
+  { key: 'webview_other', name: '기타', color: NEUTRAL },
   { key: 'webview', name: '미상', color: NEUTRAL },
 ];
 const WEBVIEW_BY_KEY = Object.fromEntries(WEBVIEW_TYPES.map((t) => [t.key, t]));
@@ -221,6 +222,7 @@ export default function AppScreensTab() {
             </Row>
             <HintText>
               막대 끝 % 는 첫 단계 대비 · 단계 화면을 한 번이라도 본 사용자 수(순서 무관) · 화면명은 iOS·Android 명세 별칭을 합산
+              {available.pageName ? '' : ' · 1.4.0 가입·온보딩 단계는 page_name 등록 후 표시'}
             </HintText>
 
             <SectionTitle>탐험 시트</SectionTitle>
