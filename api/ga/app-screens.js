@@ -24,11 +24,11 @@ export const FUNNELS = [
     title: '가입',
     steps: [
       { label: '로그인 화면', screens: ['login'] },
-      { label: '약관 동의', screens: ['sign_up_agree_terms', 'signup'] },
-      { label: '프로필', screens: ['sign_up_profile'] },
-      { label: '덕질 카테고리', screens: ['sign_up_fandom_category'] },
-      { label: '덕질 대상', screens: ['sign_up_fandom_target'] },
-      { label: '가입 처리', screens: ['sign_up_complete', 'sign_up_loading'] },
+      { label: '약관 동의', screens: ['sign_up_agree_terms', 'signup'], paged: [['terms', 'sign_up']] },
+      { label: '프로필', screens: ['sign_up_profile'], paged: [['profile', 'sign_up']] },
+      { label: '덕질 카테고리', screens: ['sign_up_fandom_category'], paged: [['fandom_category', 'sign_up']] },
+      { label: '덕질 대상', screens: ['sign_up_fandom_target'], paged: [['fandom_target', 'sign_up']] },
+      { label: '가입 처리', screens: ['sign_up_complete', 'sign_up_loading'], paged: [['loading', 'sign_up']] },
     ],
   },
   {
@@ -38,8 +38,8 @@ export const FUNNELS = [
       { label: '아이템 뽑기 시작 팝업', screens: ['onboarding_welcome'] },
       { label: '탐험 탭 뽑기 버튼 안내', screens: ['onboarding_gacha_guide', 'gacha_onboarding'] },
       { label: '행사 리스트 뽑기 버튼 안내', screens: ['onboarding_gacha_list_guide'] },
-      { label: '첫 뽑기', screens: ['onboarding_gacha_draw'] },
-      { label: '첫 뽑기 결과', screens: ['onboarding_gacha_result'] },
+      { label: '첫 뽑기', screens: ['onboarding_gacha_draw'], paged: [['gacha_draw', 'onboarding']] },
+      { label: '첫 뽑기 결과', screens: ['onboarding_gacha_result'], paged: [['gacha_draw_result', 'onboarding']] },
     ],
   },
   {
@@ -59,8 +59,9 @@ export const WEBVIEW_SCREENS = [
   'webview_instagram',
   'webview_x',
   'webview_homepage',
-  'webview_reservation',
-  'webview_ticket',
+  'webview_pre_reservation',
+  'webview_community',
+  'webview_open_chat',
   'webview_other',
   'webview',
 ];
@@ -96,11 +97,17 @@ function entranceIndex(rows) {
   return out;
 }
 
-export function buildFunnels(screenRows) {
+const pageKey = (screen, page) => `${screen}|${page}`;
+
+export function buildFunnels(screenRows, pageRows) {
   const byScreen = screenIndex(screenRows);
+  const byPage = new Map((pageRows || []).map((r) => [pageKey(r.unifiedScreenName, r['customEvent:page_name']), r]));
   return FUNNELS.map((funnel) => {
     const steps = funnel.steps.map((step) => {
-      const hits = step.screens.map((s) => byScreen.get(s)).filter(Boolean);
+      const hits = [
+        ...step.screens.map((s) => byScreen.get(s)),
+        ...(step.paged || []).map(([screen, page]) => byPage.get(pageKey(screen, page))),
+      ].filter(Boolean);
       const users = hits.reduce((sum, r) => sum + r.activeUsers, 0);
       const views = hits.reduce((sum, r) => sum + r.screenPageViews, 0);
       const seconds = hits.reduce((sum, r) => sum + r.userEngagementDuration, 0);
@@ -246,7 +253,7 @@ export default async function handler(req, res) {
     const dateRanges = [{ startDate: range.from, endDate: range.to }];
     const screenViewOf = (name) => [exact('eventName', 'screen_view'), exact('unifiedScreenName', name)];
 
-    const [screenRows, versionRows, entranceRows, storeRows, storeEntranceRows, webviewStoreRows, loadRows] =
+    const [screenRows, pageRows, versionRows, entranceRows, storeRows, storeEntranceRows, webviewStoreRows, loadRows] =
       await Promise.all([
         report(client, property, {
           dateRanges,
@@ -254,6 +261,18 @@ export default async function handler(req, res) {
           metrics: [{ name: 'screenPageViews' }, { name: 'activeUsers' }, { name: 'userEngagementDuration' }],
           limit: 250,
         }),
+        optionalReport(
+          client,
+          property,
+          {
+            dateRanges,
+            dimensions: [{ name: 'unifiedScreenName' }, { name: 'customEvent:page_name' }],
+            metrics: [{ name: 'screenPageViews' }, { name: 'activeUsers' }, { name: 'userEngagementDuration' }],
+            filters: [exact('eventName', 'screen_view'), inList('customEvent:page_name', ['sign_up', 'onboarding'])],
+            limit: 250,
+          },
+          'page_name'
+        ),
         report(client, property, {
           dateRanges,
           dimensions: [{ name: 'appVersion' }, { name: 'platform' }],
@@ -328,6 +347,7 @@ export default async function handler(req, res) {
       from: range.from,
       to: range.to,
       available: {
+        pageName: pageRows !== null,
         entrance: entranceRows !== null,
         store: storeRows !== null,
         storeEntrance: storeEntranceRows !== null,
@@ -335,7 +355,7 @@ export default async function handler(req, res) {
         loadStatus: loadRows !== null,
       },
       versions: buildVersions(versionRows),
-      funnels: buildFunnels(screenRows),
+      funnels: buildFunnels(screenRows, pageRows),
       exploration: buildExplorationSheets(screenRows, entranceRows),
       stores: buildStores(storeRows, storeEntranceRows),
       webview: buildWebview(screenRows, webviewStoreRows),
