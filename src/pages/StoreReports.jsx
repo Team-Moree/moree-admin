@@ -82,6 +82,10 @@ const TYPE_LABEL_MAP = {
   ETC: '기타',
 };
 
+// 서버 StoreLinkType.displayName 과 일치해야 앱 링크 type 이 매핑됨
+const LINK_TITLE_OPTIONS = ['홈페이지', '사전예약', '인스타그램', 'X', '커뮤니티', '오픈채팅']
+  .map((label) => ({ value: label, label }));
+
 const getProcessedParam = (filter) => {
   if (filter === PROCESSED_FILTER) return true;
   if (filter === UNPROCESSED_FILTER) return false;
@@ -710,7 +714,7 @@ export default function StoreReports() {
                 {fields.map(({ key, name, ...restField }) => (
                   <Space key={key} wrap align="baseline">
                     <Form.Item {...restField} name={[name, 'title']}>
-                      <Input placeholder="제목" style={{ width: 180 }} />
+                      <Select placeholder="링크 종류" options={LINK_TITLE_OPTIONS} style={{ width: 180 }} />
                     </Form.Item>
                     <Form.Item {...restField} name={[name, 'link']}>
                       <Input placeholder="URL" style={{ width: 360 }} />
