@@ -3,7 +3,6 @@ import { Row, Col, Statistic, Spin, Typography, DatePicker } from 'antd';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import dayjs from 'dayjs';
 import { fetchUsageTime } from '../../api/ga';
-import { IS_REAL } from '../../config/env';
 import {
   SoftCard,
   Toolbar,
@@ -57,7 +56,7 @@ export const SCREEN_LABELS = {
 };
 
 export const SCOPE_HINTS = {
-  production: '운영 앱(iOS·Android)만, 랜딩 웹·dev·stg·prd(QA) 앱 제외',
+  production: '운영 앱(iOS·Android)만, 랜딩 웹·dev·stg·prd(QA) 앱 제외 · 오늘 데이터는 GA 반영이 몇 시간 늦음',
   dev: 'dev 앱(iOS·Android)만, 운영·stg·prd(QA) 앱·랜딩 웹 제외 · 오늘 데이터는 GA 반영이 몇 시간 늦음',
 };
 
@@ -81,14 +80,12 @@ export function durationSeries(withEntrance) {
   ];
 }
 
-const lastSelectableDay = () => dayjs().subtract(IS_REAL ? 1 : 0, 'day');
-
 export function defaultRange() {
-  const to = lastSelectableDay();
+  const to = dayjs();
   return [to.subtract(27, 'day'), to];
 }
 
-export const isAfterLastDay = (d) => d.isAfter(lastSelectableDay(), 'day');
+export const isAfterToday = (d) => d.isAfter(dayjs(), 'day');
 
 function DurationCard({ title, seconds, hint }) {
   return (
@@ -178,7 +175,7 @@ export default function UsageTab() {
         <RangePicker
           value={range}
           allowClear={false}
-          disabledDate={isAfterLastDay}
+          disabledDate={isAfterToday}
           onChange={(v) => {
             if (!v) return;
             const [start, end] = v;

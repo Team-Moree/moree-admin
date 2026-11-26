@@ -15,7 +15,6 @@ const SCOPE_FILTERS = {
 };
 
 export const streamScope = () => (process.env.VERCEL_ENV === 'production' ? 'production' : 'dev');
-export const cacheControl = () => (streamScope() === 'dev' ? 'no-store' : 'private, max-age=300');
 
 export class HttpError extends Error {
   constructor(status, code, message) {
@@ -66,15 +65,14 @@ export const addDays = (s, n) => {
 const daysBetween = (a, b) => Math.round((toDate(b) - toDate(a)) / 86400000);
 const todayInSeoul = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 
-export function resolveRange(query, today = todayInSeoul(), includeToday = streamScope() === 'dev') {
-  const last = includeToday ? today : addDays(today, -1);
-  const to = query?.to ?? last;
+export function resolveRange(query, today = todayInSeoul()) {
+  const to = query?.to ?? today;
   const from = query?.from ?? addDays(to, -(DEFAULT_DAYS - 1));
   if (!DATE_RE.test(from) || !DATE_RE.test(to)) {
     throw new HttpError(400, 'INVALID_INPUT', '날짜는 YYYY-MM-DD 형식이어야 합니다.');
   }
-  if (from > to || to > last || daysBetween(from, to) + 1 > MAX_DAYS) {
-    throw new HttpError(400, 'INVALID_INPUT', `기간은 ${includeToday ? '오늘' : '어제'}까지, 최대 ${MAX_DAYS}일입니다.`);
+  if (from > to || to > today || daysBetween(from, to) + 1 > MAX_DAYS) {
+    throw new HttpError(400, 'INVALID_INPUT', `기간은 오늘까지, 최대 ${MAX_DAYS}일입니다.`);
   }
   return { from, to, today };
 }

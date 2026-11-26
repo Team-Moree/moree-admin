@@ -25,7 +25,6 @@ import {
   report,
   optionalReport,
   sendError,
-  cacheControl,
   streamScope,
   perEntrance,
   v140SecondsByScreen,
@@ -185,7 +184,7 @@ export default async function handler(req, res) {
     ]);
 
     const daily = buildDaily(dailyRows, range.from, range.to);
-    res.setHeader('Cache-Control', cacheControl());
+    res.setHeader('Cache-Control', 'private, max-age=300');
     return res.status(200).json({
       from: range.from,
       to: range.to,
