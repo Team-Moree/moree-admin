@@ -16,7 +16,7 @@ import {
   formatRate,
   useRemote,
 } from './ui';
-import { formatDuration, durationSeries, defaultRange, isAfterLastDay, SCREEN_LABELS, SCOPE_HINTS } from './UsageTab';
+import { formatDuration, durationSeries, defaultRange, isAfterToday, SCREEN_LABELS, SCOPE_HINTS } from './UsageTab';
 import { HBarChart, ChartOrTable, SERIES_COLORS, NEUTRAL } from './charts';
 
 const { Text } = Typography;
@@ -151,7 +151,7 @@ export default function AppScreensTab() {
         <RangePicker
           value={range}
           allowClear={false}
-          disabledDate={isAfterLastDay}
+          disabledDate={isAfterToday}
           onChange={(v) => {
             if (!v) return;
             const [start, end] = v;
