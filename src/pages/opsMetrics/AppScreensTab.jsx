@@ -16,7 +16,7 @@ import {
   formatRate,
   useRemote,
 } from './ui';
-import { formatDuration, durationSeries, defaultRange, isAfterToday, SCREEN_LABELS, SCOPE_HINTS } from './UsageTab';
+import { defaultRange, isAfterToday, SCREEN_LABELS, SCOPE_HINTS, PLATFORM_LABELS } from './UsageTab';
 import { HBarChart, ChartOrTable, SERIES_COLORS, NEUTRAL } from './charts';
 
 const { Text } = Typography;
@@ -24,7 +24,7 @@ const { RangePicker } = DatePicker;
 
 const MAX_DAYS = 92;
 const STORE_CHART_LIMIT = 15;
-const PLATFORM_LABELS = { iOS: 'iOS', IOS: 'iOS', Android: 'Android', ANDROID: 'Android' };
+const SCREEN_CHART_LIMIT = 15;
 const WEBVIEW_TYPES = [
   { key: 'webview_instagram', name: '인스타그램', color: SERIES_COLORS[0] },
   { key: 'webview_x', name: 'X', color: SERIES_COLORS[1] },
@@ -75,7 +75,6 @@ function FunnelCard({ funnel }) {
     { title: '사용자', dataIndex: 'users', align: 'right', render: formatNumber },
     { title: '첫 단계 대비', dataIndex: 'rateFromFirst', align: 'right', render: formatRate },
     { title: '이전 단계 대비', dataIndex: 'rateFromPrev', align: 'right', render: formatRate },
-    { title: '사용자당 체류', dataIndex: 'secondsPerUser', align: 'right', render: formatDuration },
   ];
   return (
     <SoftCard title={`${funnel.title} 단계별 도달 사용자`} size="small" style={{ height: 'auto' }}>
@@ -91,7 +90,7 @@ function FunnelCard({ funnel }) {
               series={[{ key: 'users', name: '사용자', color: SERIES_COLORS[0] }]}
               formatValue={formatNumber}
               label={{ key: 'rateFromFirst', format: pctLabel }}
-              tooltipExtra={(s) => `이전 단계 대비 ${s.rateFromPrev ?? '-'}% · 사용자당 ${formatDuration(s.secondsPerUser)}`}
+              tooltipExtra={(s) => `이전 단계 대비 ${s.rateFromPrev ?? '-'}%`}
             />
           }
         />
@@ -115,13 +114,13 @@ export default function AppScreensTab() {
     name: `${v.appVersion} · ${PLATFORM_LABELS[v.platform] || v.platform}`,
   }));
 
-  const exploration = (data?.exploration || []).map((r) => ({ ...r, name: screenLabel(r.screenName) }));
-  const explorationHasData = exploration.some((r) => r.views > 0);
-  const explorationHasPerEntrance = exploration.some((r) => r.secondsPerEntrance != null);
-  const explorationSeries = [
+  const viewSeries = [
     { key: 'views', name: '조회(복귀 포함)', color: SERIES_COLORS[2] },
     ...(available.entrance ? [ENTRANCE_SERIES] : []),
   ];
+  const screens = (data?.screens || []).map((r) => ({ ...r, name: screenLabel(r.screenName) }));
+  const exploration = (data?.exploration || []).map((r) => ({ ...r, name: screenLabel(r.screenName) }));
+  const explorationHasData = exploration.some((r) => r.views > 0);
 
   const stores = (data?.stores || []).map((s) => ({ ...s, name: truncate(s.storeName || `store_id ${s.storeId}`) }));
   const storeSeries = [
@@ -185,7 +184,6 @@ export default function AppScreensTab() {
                       { title: '버전 · 플랫폼', dataIndex: 'name' },
                       { title: '사용자', dataIndex: 'activeUsers', align: 'right', render: formatNumber },
                       { title: '화면 조회', dataIndex: 'views', align: 'right', render: formatNumber },
-                      { title: '사용자당 이용', dataIndex: 'secondsPerUser', align: 'right', render: formatDuration },
                     ]}
                     chart={
                       <HBarChart
@@ -195,7 +193,6 @@ export default function AppScreensTab() {
                         colorOf={(v) => (v.v140 ? SERIES_COLORS[0] : NEUTRAL)}
                         formatValue={formatNumber}
                         label={{ key: 'activeUsers', format: formatNumber }}
-                        tooltipExtra={(v) => `사용자당 ${formatDuration(v.secondsPerUser)}`}
                       />
                     }
                   />
@@ -206,6 +203,37 @@ export default function AppScreensTab() {
                 </SoftCard>
               </Col>
             </Row>
+
+            <SectionTitle>화면별 조회 TOP {SCREEN_CHART_LIMIT}</SectionTitle>
+            <SoftCard size="small" style={{ height: 'auto' }}>
+              {screens.length === 0 ? (
+                <Empty>기간 내 데이터 없음</Empty>
+              ) : (
+                <ChartOrTable
+                  rowKey="screenName"
+                  dataSource={screens}
+                  columns={[
+                    { title: '화면', dataIndex: 'screenName', render: screenLabelFull },
+                    { title: '조회수', dataIndex: 'views', align: 'right', render: formatNumber },
+                    { title: '진입 수', dataIndex: 'entrances', align: 'right', render: countOrDash },
+                    { title: '사용자', dataIndex: 'users', align: 'right', render: formatNumber },
+                  ]}
+                  chart={
+                    <HBarChart
+                      data={screens.slice(0, SCREEN_CHART_LIMIT)}
+                      categoryKey="name"
+                      series={viewSeries}
+                      formatValue={formatNumber}
+                      tooltipExtra={(r) => `사용자 ${formatNumber(r.users)}`}
+                    />
+                  }
+                />
+              )}
+              <HintText>
+                조회수는 다른 화면을 닫고 돌아온 복귀까지 포함(앱 1.4.0~)
+                {available.entrance ? ' · 진입 수는 새로 연 경우(is_entrance=1)만, 1.4.0 이전 데이터는 0' : ' · 진입 수는 is_entrance 등록 후 표시'}
+              </HintText>
+            </SoftCard>
 
             <SectionTitle>단계별 이탈</SectionTitle>
             <Row gutter={[16, 16]}>
@@ -222,47 +250,25 @@ export default function AppScreensTab() {
 
             <SectionTitle>탐험 시트</SectionTitle>
             {explorationHasData ? (
-              <Row gutter={[16, 16]}>
-                <Col xs={24} lg={14}>
-                  <SoftCard title="조회·진입" size="small" style={{ height: 'auto' }}>
-                    <ChartOrTable
-                      rowKey="screenName"
-                      dataSource={exploration}
-                      columns={[
-                        { title: '시트', dataIndex: 'screenName', render: screenLabelFull },
-                        { title: '조회수', dataIndex: 'views', align: 'right', render: formatNumber },
-                        { title: '진입 수', dataIndex: 'entrances', align: 'right', render: countOrDash },
-                        { title: '사용자', dataIndex: 'users', align: 'right', render: formatNumber },
-                      ]}
-                      chart={
-                        <HBarChart data={exploration} categoryKey="name" series={explorationSeries} formatValue={formatNumber} />
-                      }
-                    />
-                  </SoftCard>
-                </Col>
-                <Col xs={24} lg={10}>
-                  <SoftCard
-                    title={explorationHasPerEntrance ? '조회당·진입당 평균 체류' : '조회당 평균 체류'}
-                    size="small"
-                    style={{ height: 'auto' }}
-                  >
-                    <HBarChart
-                      data={exploration}
-                      categoryKey="name"
-                      series={durationSeries(explorationHasPerEntrance)}
-                      formatValue={formatDuration}
-                      tooltipExtra={(r) => `사용자당 ${formatDuration(r.secondsPerUser)}`}
-                      categoryWidth={110}
-                    />
-                  </SoftCard>
-                </Col>
-              </Row>
+              <SoftCard title="조회·진입" size="small" style={{ height: 'auto' }}>
+                <ChartOrTable
+                  rowKey="screenName"
+                  dataSource={exploration}
+                  columns={[
+                    { title: '시트', dataIndex: 'screenName', render: screenLabelFull },
+                    { title: '조회수', dataIndex: 'views', align: 'right', render: formatNumber },
+                    { title: '진입 수', dataIndex: 'entrances', align: 'right', render: countOrDash },
+                    { title: '사용자', dataIndex: 'users', align: 'right', render: formatNumber },
+                  ]}
+                  chart={<HBarChart data={exploration} categoryKey="name" series={viewSeries} formatValue={formatNumber} />}
+                />
+              </SoftCard>
             ) : (
               <Empty />
             )}
             <HintText>
               행사 상세는 탐험 안 상세와 단독 상세를 합친 값
-              {available.entrance ? ' · 진입당 평균은 1.4.0 이상 체류 시간 ÷ 진입 수' : ' · 진입 수는 is_entrance 등록 후 표시'}
+              {available.entrance ? '' : ' · 진입 수는 is_entrance 등록 후 표시'}
             </HintText>
 
             <SectionTitle>탐험 검색</SectionTitle>
@@ -334,7 +340,6 @@ export default function AppScreensTab() {
                         { title: '링크 종류', dataIndex: 'screenName', render: screenLabelFull },
                         { title: '진입', dataIndex: 'views', align: 'right', render: formatNumber },
                         { title: '사용자', dataIndex: 'users', align: 'right', render: formatNumber },
-                        { title: '조회당 체류', dataIndex: 'secondsPerView', align: 'right', render: formatDuration },
                       ]}
                       chart={
                         <HBarChart
@@ -344,7 +349,6 @@ export default function AppScreensTab() {
                           colorOf={(r) => WEBVIEW_BY_KEY[r.screenName]?.color || NEUTRAL}
                           formatValue={formatNumber}
                           label={{ key: 'views', format: formatNumber }}
-                          tooltipExtra={(r) => `조회당 ${formatDuration(r.secondsPerView)}`}
                           categoryWidth={90}
                         />
                       }
@@ -459,7 +463,9 @@ export default function AppScreensTab() {
               <HintText>막대 끝 % 는 복귀율 · 복귀 = 위 화면을 닫고 돌아와 다시 보인 경우(is_entrance=0) · 복귀율이 높을수록 그 화면을 거점으로 오가는 화면</HintText>
             </SoftCard>
 
-            <HintText style={{ marginTop: 16 }}>GA4 기준 · {SCOPE_HINTS[data.scope] || SCOPE_HINTS.production}</HintText>
+            <HintText style={{ marginTop: 16 }}>
+              GA4 기준 · {SCOPE_HINTS[data.scope] || SCOPE_HINTS.production} · 화면이 보인 횟수·도달만 표시, 체류 시간은 체류 시간 탭
+            </HintText>
           </>
         )}
         {!data && !error && <Text type="secondary">불러오는 중…</Text>}

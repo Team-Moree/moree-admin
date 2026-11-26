@@ -12,9 +12,7 @@ import {
   optionalReport,
   sendError,
   streamScope,
-  perEntrance,
   isV140OrLater,
-  v140SecondsByScreen,
 } from './_lib.js';
 
 const ENTRANCE_VALUES = ['1', 'true'];
@@ -69,6 +67,7 @@ export const WEBVIEW_SCREENS = [
   'webview',
 ];
 const RETURN_RATE_LIMIT = 20;
+const SCREEN_VIEW_LIMIT = 30;
 
 const isEntrance = (v) => ENTRANCE_VALUES.includes(String(v).toLowerCase());
 const isReturn = (v) => RETURN_VALUES.includes(String(v).toLowerCase());
@@ -119,7 +118,7 @@ export function buildFunnels(screenRows, pageRows) {
   });
 }
 
-export function buildExplorationSheets(screenRows, entranceRows, v140Seconds = null) {
+export function buildExplorationSheets(screenRows, entranceRows) {
   const byScreen = screenIndex(screenRows);
   const entrances = entranceIndex(entranceRows);
   return EXPLORATION_SHEETS.map((name) => {
@@ -130,11 +129,22 @@ export function buildExplorationSheets(screenRows, entranceRows, v140Seconds = n
       views: r?.screenPageViews || 0,
       entrances: entrances ? e?.entrances || 0 : null,
       users: r?.activeUsers || 0,
-      secondsPerView: perUnit(r?.userEngagementDuration || 0, r?.screenPageViews || 0),
-      secondsPerEntrance: perEntrance(v140Seconds?.get(name), e?.entrances),
-      secondsPerUser: perUnit(r?.userEngagementDuration || 0, r?.activeUsers || 0),
     };
   });
+}
+
+export function buildScreenViews(screenRows, entranceRows) {
+  const entrances = entranceIndex(entranceRows);
+  return screenRows
+    .filter((r) => r.unifiedScreenName && r.unifiedScreenName !== '(not set)')
+    .map((r) => ({
+      screenName: r.unifiedScreenName,
+      views: r.screenPageViews,
+      entrances: entrances ? entrances.get(r.unifiedScreenName)?.entrances || 0 : null,
+      users: r.activeUsers,
+    }))
+    .sort((a, b) => b.views - a.views)
+    .slice(0, SCREEN_VIEW_LIMIT);
 }
 
 export function buildReturnRates(entranceRows) {
@@ -270,7 +280,6 @@ export default async function handler(req, res) {
       storeEntranceRows,
       webviewStoreRows,
       loadRows,
-      v140Seconds,
       searchRows,
       resultTapRows,
     ] = await Promise.all([
@@ -359,7 +368,6 @@ export default async function handler(req, res) {
           },
           'load_status'
         ),
-        v140SecondsByScreen(client, property, dateRanges),
         report(client, property, { dateRanges, metrics: countMetrics, filters: [exact('eventName', 'search')] }),
         optionalReport(
           client,
@@ -385,7 +393,8 @@ export default async function handler(req, res) {
       },
       versions: buildVersions(versionRows),
       funnels: buildFunnels(screenRows, pageRows),
-      exploration: buildExplorationSheets(screenRows, entranceRows, v140Seconds),
+      screens: buildScreenViews(screenRows, entranceRows),
+      exploration: buildExplorationSheets(screenRows, entranceRows),
       search: buildSearch(searchRows, resultTapRows),
       stores: buildStores(storeRows, storeEntranceRows),
       webview: buildWebview(screenRows, webviewStoreRows),
