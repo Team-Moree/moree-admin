@@ -13,6 +13,7 @@ import {
   sendError,
   streamScope,
   isV140OrLater,
+  screenClassRows,
 } from './_lib.js';
 
 const ENTRANCE_VALUES = ['1', 'true'];
@@ -91,9 +92,12 @@ function entranceIndex(rows) {
 
 const pageKey = (screen, page) => `${screen}|${page}`;
 
-export function buildFunnels(screenRows, pageRows) {
+export function buildFunnels(screenRows, pageRows, classRows = []) {
   const byScreen = screenIndex(screenRows);
-  const byPage = new Map((pageRows || []).map((r) => [pageKey(r.unifiedScreenName, r['customEvent:page_name']), r]));
+  const byPage = new Map([
+    ...(pageRows || []).map((r) => [pageKey(r.unifiedScreenName, r['customEvent:page_name']), r]),
+    ...classRows.map((r) => [pageKey(r.unifiedScreenName, r.unifiedScreenClass), r]),
+  ]);
   return FUNNELS.map((funnel) => {
     const steps = funnel.steps.map((step) => {
       const hits = [
@@ -274,6 +278,7 @@ export default async function handler(req, res) {
     const [
       screenRows,
       pageRows,
+      classRows,
       versionRows,
       entranceRows,
       storeRows,
@@ -301,6 +306,7 @@ export default async function handler(req, res) {
           },
           'page_name'
         ),
+        screenClassRows(client, property, dateRanges),
         report(client, property, {
           dateRanges,
           dimensions: [{ name: 'appVersion' }, { name: 'platform' }],
@@ -383,7 +389,7 @@ export default async function handler(req, res) {
       to: range.to,
       scope: streamScope(),
       available: {
-        pageName: pageRows !== null,
+        pageName: pageRows !== null || classRows.length > 0,
         entrance: entranceRows !== null,
         store: storeRows !== null,
         storeEntrance: storeEntranceRows !== null,
@@ -392,7 +398,7 @@ export default async function handler(req, res) {
         searchResultTap: resultTapRows !== null,
       },
       versions: buildVersions(versionRows),
-      funnels: buildFunnels(screenRows, pageRows),
+      funnels: buildFunnels(screenRows, pageRows, classRows),
       screens: buildScreenViews(screenRows, entranceRows),
       exploration: buildExplorationSheets(screenRows, entranceRows),
       search: buildSearch(searchRows, resultTapRows),

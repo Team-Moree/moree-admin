@@ -109,6 +109,7 @@ export function isV140OrLater(version) {
 
 export const inList = (fieldName, values) => ({ filter: { fieldName, inListFilter: { values } } });
 export const exact = (fieldName, value) => ({ filter: { fieldName, stringFilter: { value } } });
+export const anyOf = (...expressions) => ({ orGroup: { expressions } });
 export const beginsWith = (fieldName, value) => ({
   filter: { fieldName, stringFilter: { matchType: 'BEGINS_WITH', value } },
 });
@@ -132,6 +133,19 @@ export async function v140SecondsByScreen(client, property, dateRanges) {
     out.set(r.unifiedScreenName, (out.get(r.unifiedScreenName) || 0) + r.userEngagementDuration);
   }
   return out;
+}
+
+export const EXPLORATION_CLASS = 'exploration';
+const PAGE_CLASSES = [EXPLORATION_CLASS, 'sign_up', 'onboarding'];
+
+export async function screenClassRows(client, property, dateRanges) {
+  return report(client, property, {
+    dateRanges,
+    dimensions: [{ name: 'unifiedScreenName' }, { name: 'unifiedScreenClass' }],
+    metrics: [{ name: 'screenPageViews' }, { name: 'activeUsers' }, { name: 'userEngagementDuration' }],
+    filters: [inList('unifiedScreenClass', PAGE_CLASSES)],
+    limit: 500,
+  });
 }
 
 export async function optionalReport(client, property, request, label) {

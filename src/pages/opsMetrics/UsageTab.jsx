@@ -138,6 +138,7 @@ export default function UsageTab() {
   }));
 
   const entranceAvailable = Boolean(data?.entranceAvailable);
+  const byScreenClass = Boolean(data?.exploration?.byScreenClass);
   const screenRows = data
     ? [
         ...(data.exploration?.views ? [{ ...data.exploration, screenName: EXPLORATION_ROW_KEY }] : []),
@@ -176,7 +177,7 @@ export default function UsageTab() {
       title: '화면',
       dataIndex: 'screenName',
       render: (n) => {
-        if (n === EXPLORATION_ROW_KEY) return <Text strong>탐험 탭 합계 (상세 제외)</Text>;
+        if (n === EXPLORATION_ROW_KEY) return <Text strong>{byScreenClass ? '탐험 탭 합계' : '탐험 탭 합계 (상세 제외)'}</Text>;
         return SCREEN_LABELS[n] ? `${SCREEN_LABELS[n]} (${n})` : n;
       },
     },
@@ -274,7 +275,10 @@ export default function UsageTab() {
                 {entranceAvailable
                   ? '진입 수는 새로 연 경우(is_entrance=1)만, 1.4.0 이전 데이터는 0 · 진입당 평균은 1.4.0 이상 체류 시간 ÷ 진입 수'
                   : '진입 수는 GA4 맞춤 측정기준 is_entrance 등록 후 표시'}{' '}
-                · 탐험 탭 합계는 exploration(1.3.x)과 store_list·store_search·gacha_list(1.4.0~)를 합친 값
+                ·{' '}
+                {byScreenClass
+                  ? '탐험 탭 합계는 exploration(1.3.x)과 screen_class 가 exploration 인 화면 전체(뽑기·탐험 안 상세 포함)를 합친 값'
+                  : '탐험 탭 합계는 exploration(1.3.x)과 store_list·store_search·gacha_list(1.4.0~)를 합친 값 · 앱이 screen_class 에 page_name 을 넣으면 뽑기 화면까지 포함'}
               </HintText>
             </SoftCard>
 
