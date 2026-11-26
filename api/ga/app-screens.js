@@ -11,6 +11,7 @@ import {
   report,
   optionalReport,
   sendError,
+  cacheControl,
   streamScope,
   perEntrance,
   isV140OrLater,
@@ -369,7 +370,7 @@ export default async function handler(req, res) {
         ),
       ]);
 
-    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.setHeader('Cache-Control', cacheControl());
     return res.status(200).json({
       from: range.from,
       to: range.to,

@@ -1,7 +1,6 @@
 import { useCallback, useState } from 'react';
 import { Row, Col, Statistic, Spin, Typography, DatePicker, Alert } from 'antd';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
-import dayjs from 'dayjs';
 import { fetchAppScreens } from '../../api/ga';
 import {
   SoftCard,
@@ -17,7 +16,7 @@ import {
   formatRate,
   useRemote,
 } from './ui';
-import { formatDuration, durationSeries, SCREEN_LABELS, SCOPE_HINTS } from './UsageTab';
+import { formatDuration, durationSeries, defaultRange, isAfterLastDay, SCREEN_LABELS, SCOPE_HINTS } from './UsageTab';
 import { HBarChart, ChartOrTable, SERIES_COLORS, NEUTRAL } from './charts';
 
 const { Text } = Typography;
@@ -44,11 +43,6 @@ const screenLabelFull = (n) => (SCREEN_LABELS[n] ? `${SCREEN_LABELS[n]} (${n})` 
 const truncate = (s, max = 14) => (s && s.length > max ? `${s.slice(0, max)}…` : s);
 const pctLabel = (v) => (v == null ? '' : `${v}%`);
 const countOrDash = (v) => (v == null ? '-' : formatNumber(v));
-
-function defaultRange() {
-  const to = dayjs().subtract(1, 'day');
-  return [to.subtract(27, 'day'), to];
-}
 
 function Needs({ what }) {
   return (
@@ -157,7 +151,7 @@ export default function AppScreensTab() {
         <RangePicker
           value={range}
           allowClear={false}
-          disabledDate={(d) => !d.isBefore(dayjs(), 'day')}
+          disabledDate={isAfterLastDay}
           onChange={(v) => {
             if (!v) return;
             const [start, end] = v;
