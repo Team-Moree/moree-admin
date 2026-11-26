@@ -72,6 +72,7 @@ export function formatDuration(seconds) {
   return s === 0 ? `${m}분` : `${m}분 ${s}초`;
 }
 
+const byDwellDesc = (a, b) => b.secondsPerView - a.secondsPerView;
 const durationLabel = (key) => ({ key, format: (v) => (v == null ? '' : formatDuration(v)) });
 
 export function durationSeries(withEntrance) {
@@ -144,18 +145,24 @@ export default function UsageTab() {
       ]
     : [];
 
-  const screenChart = screenRows.slice(0, SCREEN_CHART_LIMIT).map((r) => ({
-    ...r,
-    name: r.screenName === EXPLORATION_ROW_KEY ? '탐험 탭 합계' : SCREEN_LABELS[r.screenName] || r.screenName,
-  }));
+  const screenChart = screenRows
+    .slice(0, SCREEN_CHART_LIMIT)
+    .map((r) => ({
+      ...r,
+      name: r.screenName === EXPLORATION_ROW_KEY ? '탐험 탭 합계' : SCREEN_LABELS[r.screenName] || r.screenName,
+    }))
+    .sort(byDwellDesc);
   const hasPerEntrance = screenChart.some((r) => r.secondsPerEntrance != null);
 
-  const sheets = (data?.explorationSheets || []).map((r) => ({ ...r, name: SCREEN_LABELS[r.screenName] || r.screenName }));
+  const sheets = (data?.explorationSheets || [])
+    .map((r) => ({ ...r, name: SCREEN_LABELS[r.screenName] || r.screenName }))
+    .sort(byDwellDesc);
   const sheetsHaveData = sheets.some((r) => r.views > 0);
   const sheetsHavePerEntrance = sheets.some((r) => r.secondsPerEntrance != null);
   const webview = (data?.webview || [])
     .filter((r) => r.views > 0)
-    .map((r) => ({ ...r, name: SCREEN_LABELS[r.screenName] || r.screenName }));
+    .map((r) => ({ ...r, name: SCREEN_LABELS[r.screenName] || r.screenName }))
+    .sort(byDwellDesc);
   const versions = (data?.versions || []).slice(0, VERSION_CHART_LIMIT).map((v) => ({
     ...v,
     name: `${v.appVersion} · ${PLATFORM_LABELS[v.platform] || v.platform}`,
@@ -245,7 +252,7 @@ export default function UsageTab() {
             </SoftCard>
 
             <SoftCard
-              title={`화면별 ${hasPerEntrance ? '조회당·진입당' : '조회당'} 평균 체류 (조회 수 TOP ${SCREEN_CHART_LIMIT})`}
+              title={`화면별 ${hasPerEntrance ? '조회당·진입당' : '조회당'} 평균 체류 (조회 수 TOP ${SCREEN_CHART_LIMIT}, 조회당 체류 긴 순)`}
               style={{ marginTop: 16, height: 'auto' }}
             >
               <ChartOrTable
