@@ -22,12 +22,16 @@ import {
   round1,
   inList,
   exact,
+  anyOf,
   report,
   optionalReport,
   sendError,
   streamScope,
   perEntrance,
   v140SecondsByScreen,
+  isV140OrLater,
+  screenClassRows,
+  EXPLORATION_CLASS,
 } from './_lib.js';
 import { buildFunnels, buildVersions, buildWebview, EXPLORATION_SHEETS } from './app-screens.js';
 
@@ -99,12 +103,19 @@ export function buildExplorationSheets(screens) {
   return EXPLORATION_SHEETS.map((name) => byName.get(name) || { screenName: name, ...screenStats(null, null, null) });
 }
 
-export function buildExploration(total, entranceRows = null, v140Seconds = null) {
+export function buildExploration(total, entranceRows = null, versionRows = [], classRows = []) {
   const entrances = entranceRows
     ? entranceRows.filter((r) => EXPLORATION_SCREENS.includes(r.unifiedScreenName)).reduce((sum, r) => sum + r.eventCount, 0)
     : null;
-  const seconds = v140Seconds && EXPLORATION_SCREENS.reduce((sum, name) => sum + (v140Seconds.get(name) || 0), 0);
-  return { screenNames: EXPLORATION_SCREENS, ...screenStats(total, entrances, seconds) };
+  const seconds = versionRows
+    .filter((r) => isV140OrLater(r.appVersion))
+    .reduce((sum, r) => sum + r.userEngagementDuration, 0);
+  const classScreens = classRows.filter((r) => r.unifiedScreenClass === EXPLORATION_CLASS).map((r) => r.unifiedScreenName);
+  return {
+    screenNames: [...new Set([...EXPLORATION_SCREENS, ...classScreens])],
+    byScreenClass: classScreens.length > 0,
+    ...screenStats(total, entrances, seconds),
+  };
 }
 
 export function buildNonReturn(rows, day, cohortFrom, cohortTo) {
@@ -170,7 +181,20 @@ export default async function handler(req, res) {
     const usageMetrics = [{ name: 'activeUsers' }, { name: 'sessions' }, { name: 'userEngagementDuration' }];
 
     const screenMetrics = [{ name: 'screenPageViews' }, { name: 'activeUsers' }, { name: 'userEngagementDuration' }];
-    const [totalRows, dailyRows, screenRows, explorationRows, entranceRows, nonReturnRates, v140Seconds, pageRows, versionRows] = await Promise.all([
+    const explorationFilter = anyOf(inList('unifiedScreenName', EXPLORATION_SCREENS), exact('unifiedScreenClass', EXPLORATION_CLASS));
+    const [
+      totalRows,
+      dailyRows,
+      screenRows,
+      explorationRows,
+      explorationVersionRows,
+      classRows,
+      entranceRows,
+      nonReturnRates,
+      v140Seconds,
+      pageRows,
+      versionRows,
+    ] = await Promise.all([
       report(client, property, { dateRanges, metrics: usageMetrics }),
       report(client, property, { dateRanges, metrics: usageMetrics, dimensions: [{ name: 'date' }] }),
       report(client, property, {
@@ -183,8 +207,16 @@ export default async function handler(req, res) {
       report(client, property, {
         dateRanges,
         metrics: screenMetrics,
-        filters: [inList('unifiedScreenName', EXPLORATION_SCREENS)],
+        filters: [explorationFilter],
       }),
+      report(client, property, {
+        dateRanges,
+        dimensions: [{ name: 'appVersion' }],
+        metrics: [{ name: 'userEngagementDuration' }],
+        filters: [explorationFilter],
+        limit: 500,
+      }),
+      screenClassRows(client, property, dateRanges),
       entrancesByScreen(client, property, dateRanges),
       nonReturn(client, property, range),
       v140SecondsByScreen(client, property, dateRanges),
@@ -219,13 +251,13 @@ export default async function handler(req, res) {
       summary: buildSummary(totalRows[0], daily),
       daily,
       screens: screens.slice(0, SCREEN_LIMIT),
-      exploration: buildExploration(explorationRows[0], entranceRows, v140Seconds),
+      exploration: buildExploration(explorationRows[0], entranceRows, explorationVersionRows, classRows),
       explorationSheets: buildExplorationSheets(screens),
-      funnels: buildFunnels(screenRows, pageRows),
+      funnels: buildFunnels(screenRows, pageRows, classRows),
       webview: buildWebview(screenRows, null).byType,
       versions: buildVersions(versionRows).rows,
       entranceAvailable: entranceRows !== null,
-      pageNameAvailable: pageRows !== null,
+      pageNameAvailable: pageRows !== null || classRows.length > 0,
       nonReturn: nonReturnRates,
     });
   } catch (e) {
