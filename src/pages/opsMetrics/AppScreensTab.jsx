@@ -271,6 +271,31 @@ export default function AppScreensTab() {
               {available.entrance ? ' · 진입당 평균은 1.4.0 이상 체류 시간 ÷ 진입 수' : ' · 진입 수는 is_entrance 등록 후 표시'}
             </HintText>
 
+            <SectionTitle>탐험 검색</SectionTitle>
+            <Row gutter={[16, 16]}>
+              <Col xs={24} md={8}>
+                <SoftCard>
+                  <Statistic title="검색 실행" value={formatNumber(data.search.executions.count)} suffix="회" />
+                  <HintText>사용자 {formatNumber(data.search.executions.users)}명 · search 이벤트 전체</HintText>
+                </SoftCard>
+              </Col>
+              <Col xs={24} md={8}>
+                <SoftCard>
+                  {data.search.resultTaps ? (
+                    <>
+                      <Statistic title="검색 결과 탭" value={formatNumber(data.search.resultTaps.count)} suffix="회" />
+                      <HintText>
+                        사용자 {formatNumber(data.search.resultTaps.users)}명 · 검색 실행 대비 {formatRate(data.search.tapsPerSearch)}
+                      </HintText>
+                    </>
+                  ) : (
+                    <Needs what="element_name" />
+                  )}
+                </SoftCard>
+              </Col>
+            </Row>
+            <HintText>검색 결과 탭은 element_name=search_result_item · 맞춤 측정기준 등록 이후 데이터부터 집계</HintText>
+
             <SectionTitle>행사별 상세 조회 TOP {STORE_CHART_LIMIT}</SectionTitle>
             <SoftCard size="small" style={{ height: 'auto' }}>
               {!available.store ? (

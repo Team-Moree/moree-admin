@@ -216,6 +216,18 @@ export function buildLoadStatus(rows) {
   return { daily, total: { success, fail, failRate: ratio(fail, success + fail) } };
 }
 
+const countOf = (rows) => ({ count: rows[0]?.eventCount || 0, users: rows[0]?.totalUsers || 0 });
+
+export function buildSearch(searchRows, resultTapRows) {
+  const executions = countOf(searchRows);
+  const resultTaps = resultTapRows && countOf(resultTapRows);
+  return {
+    executions,
+    resultTaps,
+    tapsPerSearch: resultTaps ? ratio(resultTaps.count, executions.count) : null,
+  };
+}
+
 export function buildVersions(rows) {
   const versions = rows
     .filter((r) => r.appVersion && r.appVersion !== '(not set)')
@@ -247,8 +259,21 @@ export default async function handler(req, res) {
     const dateRanges = [{ startDate: range.from, endDate: range.to }];
     const screenViewOf = (name) => [exact('eventName', 'screen_view'), exact('unifiedScreenName', name)];
 
-    const [screenRows, pageRows, versionRows, entranceRows, storeRows, storeEntranceRows, webviewStoreRows, loadRows, v140Seconds] =
-      await Promise.all([
+    const countMetrics = [{ name: 'eventCount' }, { name: 'totalUsers' }];
+
+    const [
+      screenRows,
+      pageRows,
+      versionRows,
+      entranceRows,
+      storeRows,
+      storeEntranceRows,
+      webviewStoreRows,
+      loadRows,
+      v140Seconds,
+      searchRows,
+      resultTapRows,
+    ] = await Promise.all([
         report(client, property, {
           dateRanges,
           dimensions: [{ name: 'unifiedScreenName' }],
@@ -335,6 +360,13 @@ export default async function handler(req, res) {
           'load_status'
         ),
         v140SecondsByScreen(client, property, dateRanges),
+        report(client, property, { dateRanges, metrics: countMetrics, filters: [exact('eventName', 'search')] }),
+        optionalReport(
+          client,
+          property,
+          { dateRanges, metrics: countMetrics, filters: [exact('customEvent:element_name', 'search_result_item')] },
+          'element_name'
+        ),
       ]);
 
     res.setHeader('Cache-Control', 'private, max-age=300');
@@ -349,10 +381,12 @@ export default async function handler(req, res) {
         storeEntrance: storeEntranceRows !== null,
         webviewStore: webviewStoreRows !== null,
         loadStatus: loadRows !== null,
+        searchResultTap: resultTapRows !== null,
       },
       versions: buildVersions(versionRows),
       funnels: buildFunnels(screenRows, pageRows),
       exploration: buildExplorationSheets(screenRows, entranceRows, v140Seconds),
+      search: buildSearch(searchRows, resultTapRows),
       stores: buildStores(storeRows, storeEntranceRows),
       webview: buildWebview(screenRows, webviewStoreRows),
       loadStatus: buildLoadStatus(loadRows),
