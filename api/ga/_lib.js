@@ -5,18 +5,16 @@ const { BetaAnalyticsDataClient } = pkg;
 export const MAX_DAYS = 92;
 export const DEFAULT_DAYS = 28;
 
-export const PROD_APP_ONLY = {
-  andGroup: {
-    expressions: [
-      { notExpression: { filter: { fieldName: 'platform', stringFilter: { value: 'web' } } } },
-      {
-        notExpression: {
-          filter: { fieldName: 'streamName', stringFilter: { matchType: 'FULL_REGEXP', value: '.*-(dev|stg|prd)' } },
-        },
-      },
-    ],
-  },
+const V140 = [1, 4, 0];
+
+const streamMatches = (value) => ({ filter: { fieldName: 'streamName', stringFilter: { matchType: 'FULL_REGEXP', value } } });
+const NOT_WEB = { notExpression: { filter: { fieldName: 'platform', stringFilter: { value: 'web' } } } };
+const SCOPE_FILTERS = {
+  production: [NOT_WEB, { notExpression: streamMatches('.*-(dev|stg|prd)') }],
+  dev: [NOT_WEB, streamMatches('.*-dev')],
 };
+
+export const streamScope = () => (process.env.VERCEL_ENV === 'production' ? 'production' : 'dev');
 
 export class HttpError extends Error {
   constructor(status, code, message) {
@@ -97,6 +95,17 @@ export function records(report) {
 export const round1 = (v) => Math.round(v * 10) / 10;
 export const perUnit = (seconds, count) => (count > 0 ? round1(seconds / count) : 0);
 export const ratio = (part, whole) => (whole > 0 ? round1((part / whole) * 100) : null);
+export const perEntrance = (seconds, entrances) => (seconds != null && entrances > 0 ? round1(seconds / entrances) : null);
+
+export function isV140OrLater(version) {
+  const parts = String(version).split('.').map((n) => Number.parseInt(n, 10));
+  if (parts.some(Number.isNaN)) return false;
+  for (let i = 0; i < V140.length; i += 1) {
+    const a = parts[i] ?? 0;
+    if (a !== V140[i]) return a > V140[i];
+  }
+  return true;
+}
 
 export const inList = (fieldName, values) => ({ filter: { fieldName, inListFilter: { values } } });
 export const exact = (fieldName, value) => ({ filter: { fieldName, stringFilter: { value } } });
@@ -105,9 +114,24 @@ export const beginsWith = (fieldName, value) => ({
 });
 
 export async function report(client, property, { filters = [], ...request }) {
-  const dimensionFilter = { andGroup: { expressions: [...PROD_APP_ONLY.andGroup.expressions, ...filters] } };
+  const dimensionFilter = { andGroup: { expressions: [...SCOPE_FILTERS[streamScope()], ...filters] } };
   const [resp] = await client.runReport({ property, dimensionFilter, ...request });
   return records(resp);
+}
+
+export async function v140SecondsByScreen(client, property, dateRanges) {
+  const rows = await report(client, property, {
+    dateRanges,
+    dimensions: [{ name: 'unifiedScreenName' }, { name: 'appVersion' }],
+    metrics: [{ name: 'userEngagementDuration' }],
+    limit: 5000,
+  });
+  const out = new Map();
+  for (const r of rows) {
+    if (!isV140OrLater(r.appVersion)) continue;
+    out.set(r.unifiedScreenName, (out.get(r.unifiedScreenName) || 0) + r.userEngagementDuration);
+  }
+  return out;
 }
 
 export async function optionalReport(client, property, request, label) {

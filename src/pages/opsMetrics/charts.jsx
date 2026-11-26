@@ -26,7 +26,12 @@ export function HBarChart({
   const showLegend = series.length > 1;
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} layout="vertical" margin={{ top: 4, right: label ? 72 : 16, left: 0, bottom: 0 }} barGap={2}>
+      <BarChart
+        data={data}
+        layout="vertical"
+        margin={{ top: 4, right: label || series.some((s) => s.label) ? 72 : 16, left: 0, bottom: 0 }}
+        barGap={2}
+      >
         <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
         <XAxis type="number" tick={AXIS_TICK} tickFormatter={formatValue} allowDecimals={false} />
         <YAxis type="category" dataKey={categoryKey} width={categoryWidth} tick={AXIS_TICK} interval={0} />
@@ -41,6 +46,7 @@ export function HBarChart({
         {showLegend && <Legend verticalAlign="top" height={28} iconType="circle" />}
         {series.map((s, i) => {
           const last = !stacked || i === series.length - 1;
+          const barLabel = s.label || (last ? label : null);
           return (
             <Bar
               key={s.key}
@@ -55,7 +61,9 @@ export function HBarChart({
               isAnimationActive={false}
             >
               {colorOf && data.map((d) => <Cell key={d[categoryKey]} fill={colorOf(d)} />)}
-              {label && last && <LabelList dataKey={label.key} position="right" formatter={label.format} style={{ fontSize: 12, fill: '#595959' }} />}
+              {barLabel && (
+                <LabelList dataKey={barLabel.key} position="right" formatter={barLabel.format} style={{ fontSize: 12, fill: '#595959' }} />
+              )}
             </Bar>
           );
         })}

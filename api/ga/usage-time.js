@@ -7,8 +7,8 @@
 //
 // 지표 기준
 //   - 이용 시간: userEngagementDuration (앱이 포그라운드였던 시간). averageSessionDuration 은 쓰지 않는다.
-//   - 랜딩 웹과 앱 dev·stg·prd(QA) 빌드가 같은 GA 속성에 섞여 있어 운영 앱만 집계한다
-//     (platform != web, 스트림 이름이 -dev·-stg·-prd 로 끝나는 것 제외).
+//   - 랜딩 웹과 앱 dev·stg·prd(QA) 빌드가 같은 GA 속성에 섞여 있어 운영 배포는 운영 앱만 집계한다
+//     (platform != web, 스트림 이름이 -dev·-stg·-prd 로 끝나는 것 제외). 그 외 배포는 -dev 스트림만 집계한다.
 //   - 미복귀율: 기간 안에 첫 방문한 사용자 중 N일째 다시 오지 않은 비율. N일이 지나지 않은 첫 방문일은 뺀다.
 //     코호트를 한 요청에 여러 개 넣으면 GA 가 두 번째 코호트를 비워서 돌려주므로 하나씩 요청한다.
 
@@ -25,6 +25,9 @@ import {
   report,
   optionalReport,
   sendError,
+  streamScope,
+  perEntrance,
+  v140SecondsByScreen,
 } from './_lib.js';
 
 export { resolveRange };
@@ -67,32 +70,34 @@ export function buildSummary(total, daily) {
   };
 }
 
-function screenStats(r, entrances) {
+function screenStats(r, entrances, v140Seconds) {
   return {
     views: r?.screenPageViews || 0,
     entrances,
     users: r?.activeUsers || 0,
     engagementSeconds: Math.round(r?.userEngagementDuration || 0),
     secondsPerView: perUnit(r?.userEngagementDuration || 0, r?.screenPageViews || 0),
+    secondsPerEntrance: perEntrance(v140Seconds, entrances),
     secondsPerUser: perUnit(r?.userEngagementDuration || 0, r?.activeUsers || 0),
   };
 }
 
-export function buildScreens(rows, entranceRows = null) {
+export function buildScreens(rows, entranceRows = null, v140Seconds = null) {
   const entrances = entranceRows && new Map(entranceRows.map((r) => [r.unifiedScreenName, r.eventCount]));
   return rows
     .filter((r) => r.unifiedScreenName && r.unifiedScreenName !== '(not set)')
     .map((r) => ({
       screenName: r.unifiedScreenName,
-      ...screenStats(r, entrances ? entrances.get(r.unifiedScreenName) || 0 : null),
+      ...screenStats(r, entrances ? entrances.get(r.unifiedScreenName) || 0 : null, v140Seconds?.get(r.unifiedScreenName)),
     }));
 }
 
-export function buildExploration(total, entranceRows = null) {
+export function buildExploration(total, entranceRows = null, v140Seconds = null) {
   const entrances = entranceRows
     ? entranceRows.filter((r) => EXPLORATION_SCREENS.includes(r.unifiedScreenName)).reduce((sum, r) => sum + r.eventCount, 0)
     : null;
-  return { screenNames: EXPLORATION_SCREENS, ...screenStats(total, entrances) };
+  const seconds = v140Seconds && EXPLORATION_SCREENS.reduce((sum, name) => sum + (v140Seconds.get(name) || 0), 0);
+  return { screenNames: EXPLORATION_SCREENS, ...screenStats(total, entrances, seconds) };
 }
 
 export function buildNonReturn(rows, day, cohortFrom, cohortTo) {
@@ -158,7 +163,7 @@ export default async function handler(req, res) {
     const usageMetrics = [{ name: 'activeUsers' }, { name: 'sessions' }, { name: 'userEngagementDuration' }];
 
     const screenMetrics = [{ name: 'screenPageViews' }, { name: 'activeUsers' }, { name: 'userEngagementDuration' }];
-    const [totalRows, dailyRows, screenRows, explorationRows, entranceRows, nonReturnRates] = await Promise.all([
+    const [totalRows, dailyRows, screenRows, explorationRows, entranceRows, nonReturnRates, v140Seconds] = await Promise.all([
       report(client, property, { dateRanges, metrics: usageMetrics }),
       report(client, property, { dateRanges, metrics: usageMetrics, dimensions: [{ name: 'date' }] }),
       report(client, property, {
@@ -175,6 +180,7 @@ export default async function handler(req, res) {
       }),
       entrancesByScreen(client, property, dateRanges),
       nonReturn(client, property, range),
+      v140SecondsByScreen(client, property, dateRanges),
     ]);
 
     const daily = buildDaily(dailyRows, range.from, range.to);
@@ -182,10 +188,11 @@ export default async function handler(req, res) {
     return res.status(200).json({
       from: range.from,
       to: range.to,
+      scope: streamScope(),
       summary: buildSummary(totalRows[0], daily),
       daily,
-      screens: buildScreens(screenRows, entranceRows),
-      exploration: buildExploration(explorationRows[0], entranceRows),
+      screens: buildScreens(screenRows, entranceRows, v140Seconds),
+      exploration: buildExploration(explorationRows[0], entranceRows, v140Seconds),
       entranceAvailable: entranceRows !== null,
       nonReturn: nonReturnRates,
     });
