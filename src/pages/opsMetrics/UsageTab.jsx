@@ -55,6 +55,11 @@ export const SCREEN_LABELS = {
   settings: '설정',
 };
 
+export const SCOPE_HINTS = {
+  production: '운영 앱(iOS·Android)만, 랜딩 웹·dev·stg·prd(QA) 앱 제외',
+  dev: 'dev 앱(iOS·Android)만, 운영·stg·prd(QA) 앱·랜딩 웹 제외',
+};
+
 export function formatDuration(seconds) {
   if (seconds == null) return '-';
   const total = Math.round(seconds);
@@ -62,6 +67,17 @@ export function formatDuration(seconds) {
   const s = total % 60;
   if (m === 0) return `${s}초`;
   return s === 0 ? `${m}분` : `${m}분 ${s}초`;
+}
+
+const durationLabel = (key) => ({ key, format: (v) => (v == null ? '' : formatDuration(v)) });
+
+export function durationSeries(withEntrance) {
+  return [
+    { key: 'secondsPerView', name: '조회당', color: SERIES_COLORS[3], label: durationLabel('secondsPerView') },
+    ...(withEntrance
+      ? [{ key: 'secondsPerEntrance', name: '진입당', color: SERIES_COLORS[0], label: durationLabel('secondsPerEntrance') }]
+      : []),
+  ];
 }
 
 function defaultRange() {
@@ -124,6 +140,7 @@ export default function UsageTab() {
     ...r,
     name: r.screenName === EXPLORATION_ROW_KEY ? '탐험 탭 합계' : SCREEN_LABELS[r.screenName] || r.screenName,
   }));
+  const hasPerEntrance = screenChart.some((r) => r.secondsPerEntrance != null);
   const viewSeries = [
     { key: 'views', name: '조회(복귀 포함)', color: SERIES_COLORS[2] },
     ...(entranceAvailable ? [{ key: 'entrances', name: '진입', color: SERIES_COLORS[0] }] : []),
@@ -144,6 +161,9 @@ export default function UsageTab() {
       : []),
     { title: '사용자', dataIndex: 'users', align: 'right', render: formatNumber },
     { title: '조회당 평균', dataIndex: 'secondsPerView', align: 'right', render: formatDuration },
+    ...(entranceAvailable
+      ? [{ title: '진입당 평균', dataIndex: 'secondsPerEntrance', align: 'right', render: formatDuration }]
+      : []),
     { title: '사용자당 평균', dataIndex: 'secondsPerUser', align: 'right', render: formatDuration },
   ];
 
@@ -218,13 +238,12 @@ export default function UsageTab() {
                       <HBarChart data={screenChart} categoryKey="name" series={viewSeries} formatValue={formatNumber} />
                     </Col>
                     <Col xs={24} lg={11}>
-                      <Text strong>조회당 평균 체류</Text>
+                      <Text strong>{hasPerEntrance ? '조회당·진입당 평균 체류' : '조회당 평균 체류'}</Text>
                       <HBarChart
                         data={screenChart}
                         categoryKey="name"
-                        series={[{ key: 'secondsPerView', name: '조회당 체류', color: SERIES_COLORS[3] }]}
+                        series={durationSeries(hasPerEntrance)}
                         formatValue={formatDuration}
-                        label={{ key: 'secondsPerView', format: formatDuration }}
                         tooltipExtra={(r) => `사용자당 ${formatDuration(r.secondsPerUser)}`}
                         categoryWidth={120}
                       />
@@ -235,14 +254,14 @@ export default function UsageTab() {
               <HintText>
                 조회수는 다른 화면을 닫고 돌아온 복귀까지 포함(앱 1.4.0~) ·{' '}
                 {entranceAvailable
-                  ? '진입 수는 새로 연 경우(is_entrance=1)만, 1.4.0 이전 데이터는 0'
+                  ? '진입 수는 새로 연 경우(is_entrance=1)만, 1.4.0 이전 데이터는 0 · 진입당 평균은 1.4.0 이상 체류 시간 ÷ 진입 수'
                   : '진입 수는 GA4 맞춤 측정기준 is_entrance 등록 후 표시'}{' '}
                 · 탐험 탭 합계는 exploration(1.3.x)과 store_list·store_search·gacha_list(1.4.0~)를 합친 값
               </HintText>
             </SoftCard>
 
             <HintText style={{ marginTop: 16 }}>
-              GA4 기준 · 운영 앱(iOS·Android)만, 랜딩 웹·dev·stg·prd(QA) 앱 제외 · 이용 시간은 앱이 화면에 떠 있던 시간(백그라운드 제외) ·
+              GA4 기준 · {SCOPE_HINTS[data.scope] || SCOPE_HINTS.production} · 이용 시간은 앱이 화면에 떠 있던 시간(백그라운드 제외) ·
               미복귀율은 첫 방문 후 N일째 날 다시 오지 않은 비율
             </HintText>
           </>

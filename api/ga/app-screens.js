@@ -11,12 +11,15 @@ import {
   report,
   optionalReport,
   sendError,
+  streamScope,
+  perEntrance,
+  isV140OrLater,
+  v140SecondsByScreen,
 } from './_lib.js';
 
 const ENTRANCE_VALUES = ['1', 'true'];
 const RETURN_VALUES = ['0', 'false'];
 const STORE_LIMIT = 30;
-const V140 = [1, 4, 0];
 
 export const FUNNELS = [
   {
@@ -70,16 +73,6 @@ const RETURN_RATE_LIMIT = 20;
 const isEntrance = (v) => ENTRANCE_VALUES.includes(String(v).toLowerCase());
 const isReturn = (v) => RETURN_VALUES.includes(String(v).toLowerCase());
 
-export function isV140OrLater(version) {
-  const parts = String(version).split('.').map((n) => Number.parseInt(n, 10));
-  if (parts.some(Number.isNaN)) return false;
-  for (let i = 0; i < V140.length; i += 1) {
-    const a = parts[i] ?? 0;
-    if (a !== V140[i]) return a > V140[i];
-  }
-  return true;
-}
-
 function screenIndex(rows) {
   return new Map(rows.map((r) => [r.unifiedScreenName, r]));
 }
@@ -126,7 +119,7 @@ export function buildFunnels(screenRows, pageRows) {
   });
 }
 
-export function buildExplorationSheets(screenRows, entranceRows) {
+export function buildExplorationSheets(screenRows, entranceRows, v140Seconds = null) {
   const byScreen = screenIndex(screenRows);
   const entrances = entranceIndex(entranceRows);
   return EXPLORATION_SHEETS.map((name) => {
@@ -138,6 +131,7 @@ export function buildExplorationSheets(screenRows, entranceRows) {
       entrances: entrances ? e?.entrances || 0 : null,
       users: r?.activeUsers || 0,
       secondsPerView: perUnit(r?.userEngagementDuration || 0, r?.screenPageViews || 0),
+      secondsPerEntrance: perEntrance(v140Seconds?.get(name), e?.entrances),
       secondsPerUser: perUnit(r?.userEngagementDuration || 0, r?.activeUsers || 0),
     };
   });
@@ -253,7 +247,7 @@ export default async function handler(req, res) {
     const dateRanges = [{ startDate: range.from, endDate: range.to }];
     const screenViewOf = (name) => [exact('eventName', 'screen_view'), exact('unifiedScreenName', name)];
 
-    const [screenRows, pageRows, versionRows, entranceRows, storeRows, storeEntranceRows, webviewStoreRows, loadRows] =
+    const [screenRows, pageRows, versionRows, entranceRows, storeRows, storeEntranceRows, webviewStoreRows, loadRows, v140Seconds] =
       await Promise.all([
         report(client, property, {
           dateRanges,
@@ -340,12 +334,14 @@ export default async function handler(req, res) {
           },
           'load_status'
         ),
+        v140SecondsByScreen(client, property, dateRanges),
       ]);
 
     res.setHeader('Cache-Control', 'private, max-age=300');
     return res.status(200).json({
       from: range.from,
       to: range.to,
+      scope: streamScope(),
       available: {
         pageName: pageRows !== null,
         entrance: entranceRows !== null,
@@ -356,7 +352,7 @@ export default async function handler(req, res) {
       },
       versions: buildVersions(versionRows),
       funnels: buildFunnels(screenRows, pageRows),
-      exploration: buildExplorationSheets(screenRows, entranceRows),
+      exploration: buildExplorationSheets(screenRows, entranceRows, v140Seconds),
       stores: buildStores(storeRows, storeEntranceRows),
       webview: buildWebview(screenRows, webviewStoreRows),
       loadStatus: buildLoadStatus(loadRows),

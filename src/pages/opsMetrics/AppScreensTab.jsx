@@ -17,7 +17,7 @@ import {
   formatRate,
   useRemote,
 } from './ui';
-import { formatDuration, SCREEN_LABELS } from './UsageTab';
+import { formatDuration, durationSeries, SCREEN_LABELS, SCOPE_HINTS } from './UsageTab';
 import { HBarChart, ChartOrTable, SERIES_COLORS, NEUTRAL } from './charts';
 
 const { Text } = Typography;
@@ -123,6 +123,7 @@ export default function AppScreensTab() {
 
   const exploration = (data?.exploration || []).map((r) => ({ ...r, name: screenLabel(r.screenName) }));
   const explorationHasData = exploration.some((r) => r.views > 0);
+  const explorationHasPerEntrance = exploration.some((r) => r.secondsPerEntrance != null);
   const explorationSeries = [
     { key: 'views', name: '조회(복귀 포함)', color: SERIES_COLORS[2] },
     ...(available.entrance ? [ENTRANCE_SERIES] : []),
@@ -246,13 +247,16 @@ export default function AppScreensTab() {
                   </SoftCard>
                 </Col>
                 <Col xs={24} lg={10}>
-                  <SoftCard title="조회당 평균 체류" size="small" style={{ height: 'auto' }}>
+                  <SoftCard
+                    title={explorationHasPerEntrance ? '조회당·진입당 평균 체류' : '조회당 평균 체류'}
+                    size="small"
+                    style={{ height: 'auto' }}
+                  >
                     <HBarChart
                       data={exploration}
                       categoryKey="name"
-                      series={[{ key: 'secondsPerView', name: '조회당 체류', color: SERIES_COLORS[3] }]}
+                      series={durationSeries(explorationHasPerEntrance)}
                       formatValue={formatDuration}
-                      label={{ key: 'secondsPerView', format: formatDuration }}
                       tooltipExtra={(r) => `사용자당 ${formatDuration(r.secondsPerUser)}`}
                       categoryWidth={110}
                     />
@@ -264,7 +268,7 @@ export default function AppScreensTab() {
             )}
             <HintText>
               행사 상세는 탐험 안 상세와 단독 상세를 합친 값
-              {available.entrance ? '' : ' · 진입 수는 is_entrance 등록 후 표시'}
+              {available.entrance ? ' · 진입당 평균은 1.4.0 이상 체류 시간 ÷ 진입 수' : ' · 진입 수는 is_entrance 등록 후 표시'}
             </HintText>
 
             <SectionTitle>행사별 상세 조회 TOP {STORE_CHART_LIMIT}</SectionTitle>
@@ -436,7 +440,7 @@ export default function AppScreensTab() {
               <HintText>막대 끝 % 는 복귀율 · 복귀 = 위 화면을 닫고 돌아와 다시 보인 경우(is_entrance=0) · 복귀율이 높을수록 그 화면을 거점으로 오가는 화면</HintText>
             </SoftCard>
 
-            <HintText style={{ marginTop: 16 }}>GA4 기준 · 운영 앱(iOS·Android)만, 랜딩 웹·dev·stg·prd(QA) 앱 제외</HintText>
+            <HintText style={{ marginTop: 16 }}>GA4 기준 · {SCOPE_HINTS[data.scope] || SCOPE_HINTS.production}</HintText>
           </>
         )}
         {!data && !error && <Text type="secondary">불러오는 중…</Text>}
