@@ -29,6 +29,8 @@ import {
   streamScope,
   perEntrance,
   v140SecondsByScreen,
+  entrancesByScreen,
+  entranceDateRanges,
   isV140OrLater,
   screenClassRows,
   EXPLORATION_CLASS,
@@ -41,7 +43,6 @@ const RETURN_DAYS = [7, 30];
 const SCREEN_LIMIT = 50;
 const SCREEN_QUERY_LIMIT = 250;
 const EXPLORATION_SCREENS = ['exploration', 'store_list', 'store_search', 'gacha_list'];
-const ENTRANCE_VALUES = ['1', 'true'];
 
 export function buildDaily(rows, from, to) {
   const byDate = new Map(rows.map((r) => [`${r.date.slice(0, 4)}-${r.date.slice(4, 6)}-${r.date.slice(6, 8)}`, r]));
@@ -89,7 +90,7 @@ function screenStats(r, entrances, v140Seconds) {
 }
 
 export function buildScreens(rows, entranceRows = null, v140Seconds = null) {
-  const entrances = entranceRows && new Map(entranceRows.map((r) => [r.unifiedScreenName, r.eventCount]));
+  const entrances = entranceRows && new Map(entranceRows.map((r) => [r.unifiedScreenName, r.entrances]));
   return rows
     .filter((r) => r.unifiedScreenName && r.unifiedScreenName !== '(not set)')
     .map((r) => ({
@@ -105,7 +106,7 @@ export function buildExplorationSheets(screens) {
 
 export function buildExploration(total, entranceRows = null, versionRows = [], classRows = []) {
   const entrances = entranceRows
-    ? entranceRows.filter((r) => EXPLORATION_SCREENS.includes(r.unifiedScreenName)).reduce((sum, r) => sum + r.eventCount, 0)
+    ? entranceRows.filter((r) => EXPLORATION_SCREENS.includes(r.unifiedScreenName)).reduce((sum, r) => sum + r.entrances, 0)
     : null;
   const seconds = versionRows
     .filter((r) => isV140OrLater(r.appVersion))
@@ -129,21 +130,6 @@ export function buildNonReturn(rows, day, cohortFrom, cohortTo) {
     returned,
     nonReturnRate: users === 0 ? null : round1(100 - (returned / users) * 100),
   };
-}
-
-async function entrancesByScreen(client, property, dateRanges) {
-  return optionalReport(
-    client,
-    property,
-    {
-      dateRanges,
-      dimensions: [{ name: 'unifiedScreenName' }],
-      metrics: [{ name: 'eventCount' }],
-      filters: [exact('eventName', 'screen_view'), inList('customEvent:is_entrance', ENTRANCE_VALUES)],
-      limit: SCREEN_QUERY_LIMIT,
-    },
-    '진입 수'
-  );
 }
 
 async function nonReturn(client, property, { from, to, today }) {
@@ -178,6 +164,7 @@ export default async function handler(req, res) {
     const client = getClient(config);
     const property = `properties/${config.propertyId}`;
     const dateRanges = [{ startDate: range.from, endDate: range.to }];
+    const entranceRanges = entranceDateRanges(range);
     const usageMetrics = [{ name: 'activeUsers' }, { name: 'sessions' }, { name: 'userEngagementDuration' }];
 
     const screenMetrics = [{ name: 'screenPageViews' }, { name: 'activeUsers' }, { name: 'userEngagementDuration' }];
@@ -209,17 +196,19 @@ export default async function handler(req, res) {
         metrics: screenMetrics,
         filters: [explorationFilter],
       }),
-      report(client, property, {
-        dateRanges,
-        dimensions: [{ name: 'appVersion' }],
-        metrics: [{ name: 'userEngagementDuration' }],
-        filters: [explorationFilter],
-        limit: 500,
-      }),
+      entranceRanges
+        ? report(client, property, {
+            dateRanges: entranceRanges,
+            dimensions: [{ name: 'appVersion' }],
+            metrics: [{ name: 'userEngagementDuration' }],
+            filters: [explorationFilter],
+            limit: 500,
+          })
+        : [],
       screenClassRows(client, property, dateRanges),
-      entrancesByScreen(client, property, dateRanges),
+      entrancesByScreen(client, property, entranceRanges),
       nonReturn(client, property, range),
-      v140SecondsByScreen(client, property, dateRanges),
+      v140SecondsByScreen(client, property, entranceRanges),
       optionalReport(
         client,
         property,

@@ -14,10 +14,11 @@ import {
   streamScope,
   isV140OrLater,
   screenClassRows,
+  entrancesByScreen,
+  entranceDateRanges,
+  ENTRANCE_METRIC,
 } from './_lib.js';
 
-const ENTRANCE_VALUES = ['1', 'true'];
-const RETURN_VALUES = ['0', 'false'];
 const STORE_LIMIT = 30;
 
 export const FUNNELS = [
@@ -70,24 +71,13 @@ export const WEBVIEW_SCREENS = [
 const RETURN_RATE_LIMIT = 20;
 const SCREEN_VIEW_LIMIT = 30;
 
-const isEntrance = (v) => ENTRANCE_VALUES.includes(String(v).toLowerCase());
-const isReturn = (v) => RETURN_VALUES.includes(String(v).toLowerCase());
-
 function screenIndex(rows) {
   return new Map(rows.map((r) => [r.unifiedScreenName, r]));
 }
 
 function entranceIndex(rows) {
   if (!rows) return null;
-  const out = new Map();
-  for (const r of rows) {
-    const cur = out.get(r.unifiedScreenName) || { entrances: 0, returns: 0 };
-    if (isEntrance(r['customEvent:is_entrance'])) cur.entrances += r.eventCount;
-    else if (isReturn(r['customEvent:is_entrance'])) cur.returns += r.eventCount;
-    else continue;
-    out.set(r.unifiedScreenName, cur);
-  }
-  return out;
+  return new Map(rows.map((r) => [r.unifiedScreenName, r]));
 }
 
 const pageKey = (screen, page) => `${screen}|${page}`;
@@ -170,7 +160,7 @@ export function buildReturnRates(entranceRows) {
 export function buildStores(storeRows, storeEntranceRows) {
   if (!storeRows) return null;
   const key = (r) => `${r['customEvent:store_id']}|${r['customEvent:store_name']}`;
-  const entrances = storeEntranceRows && new Map(storeEntranceRows.map((r) => [key(r), r.eventCount]));
+  const entrances = storeEntranceRows && new Map(storeEntranceRows.map((r) => [key(r), r[ENTRANCE_METRIC]]));
   return storeRows
     .filter((r) => r['customEvent:store_id'] && r['customEvent:store_id'] !== '(not set)')
     .map((r) => ({
@@ -271,6 +261,7 @@ export default async function handler(req, res) {
     const client = getClient(config);
     const property = `properties/${config.propertyId}`;
     const dateRanges = [{ startDate: range.from, endDate: range.to }];
+    const entranceRanges = entranceDateRanges(range);
     const screenViewOf = (name) => [exact('eventName', 'screen_view'), exact('unifiedScreenName', name)];
 
     const countMetrics = [{ name: 'eventCount' }, { name: 'totalUsers' }];
@@ -313,18 +304,7 @@ export default async function handler(req, res) {
           metrics: [{ name: 'activeUsers' }, { name: 'screenPageViews' }, { name: 'userEngagementDuration' }],
           limit: 100,
         }),
-        optionalReport(
-          client,
-          property,
-          {
-            dateRanges,
-            dimensions: [{ name: 'unifiedScreenName' }, { name: 'customEvent:is_entrance' }],
-            metrics: [{ name: 'eventCount' }],
-            filters: [exact('eventName', 'screen_view')],
-            limit: 500,
-          },
-          'is_entrance'
-        ),
+        entrancesByScreen(client, property, entranceRanges),
         optionalReport(
           client,
           property,
@@ -338,18 +318,20 @@ export default async function handler(req, res) {
           },
           'store_id'
         ),
-        optionalReport(
-          client,
-          property,
-          {
-            dateRanges,
-            dimensions: [{ name: 'customEvent:store_id' }, { name: 'customEvent:store_name' }],
-            metrics: [{ name: 'eventCount' }],
-            filters: [...screenViewOf('store_detail'), inList('customEvent:is_entrance', ENTRANCE_VALUES)],
-            limit: 500,
-          },
-          'store_id + is_entrance'
-        ),
+        entranceRanges
+          ? optionalReport(
+              client,
+              property,
+              {
+                dateRanges: entranceRanges,
+                dimensions: [{ name: 'customEvent:store_id' }, { name: 'customEvent:store_name' }],
+                metrics: [{ name: ENTRANCE_METRIC }],
+                filters: screenViewOf('store_detail'),
+                limit: 500,
+              },
+              'store_id + is_entrance'
+            )
+          : [],
         optionalReport(
           client,
           property,

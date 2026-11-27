@@ -231,7 +231,7 @@ export default function AppScreensTab() {
               )}
               <HintText>
                 조회수는 다른 화면을 닫고 돌아온 복귀까지 포함(앱 1.4.0~)
-                {available.entrance ? ' · 진입 수는 새로 연 경우(is_entrance=1)만, 1.4.0 이전 데이터는 0' : ' · 진입 수는 is_entrance 등록 후 표시'}
+                {available.entrance ? ' · 진입 수는 새로 연 경우(is_entrance=1)만, 앱 1.4.0 이상·11/27 이후 이벤트만 집계' : ' · 진입 수는 is_entrance 등록 후 표시'}
               </HintText>
             </SoftCard>
 
@@ -460,7 +460,7 @@ export default function AppScreensTab() {
                   }
                 />
               )}
-              <HintText>막대 끝 % 는 복귀율 · 복귀 = 위 화면을 닫고 돌아와 다시 보인 경우(is_entrance=0) · 복귀율이 높을수록 그 화면을 거점으로 오가는 화면</HintText>
+              <HintText>막대 끝 % 는 복귀율 · 복귀 = 위 화면을 닫고 돌아와 다시 보인 경우(is_entrance=0), 앱 1.4.0 이상·11/27 이후 이벤트만 집계 · 복귀율이 높을수록 그 화면을 거점으로 오가는 화면</HintText>
             </SoftCard>
 
             <HintText style={{ marginTop: 16 }}>
