@@ -120,7 +120,42 @@ export async function report(client, property, { filters = [], ...request }) {
   return records(resp);
 }
 
+export const ENTRANCE_METRIC = 'customEvent:is_entrance';
+const ENTRANCE_SINCE = '2026-11-27';
+
+export function entranceDateRanges({ from, to }) {
+  if (to < ENTRANCE_SINCE) return null;
+  return [{ startDate: from > ENTRANCE_SINCE ? from : ENTRANCE_SINCE, endDate: to }];
+}
+
+export async function entrancesByScreen(client, property, dateRanges) {
+  if (!dateRanges) return [];
+  const rows = await optionalReport(
+    client,
+    property,
+    {
+      dateRanges,
+      dimensions: [{ name: 'unifiedScreenName' }, { name: 'appVersion' }],
+      metrics: [{ name: ENTRANCE_METRIC }, { name: 'eventCount' }],
+      filters: [exact('eventName', 'screen_view')],
+      limit: 5000,
+    },
+    'is_entrance'
+  );
+  if (!rows) return null;
+  const out = new Map();
+  for (const r of rows) {
+    if (!isV140OrLater(r.appVersion)) continue;
+    const cur = out.get(r.unifiedScreenName) || { unifiedScreenName: r.unifiedScreenName, entrances: 0, returns: 0 };
+    cur.entrances += r[ENTRANCE_METRIC];
+    cur.returns += Math.max(0, r.eventCount - r[ENTRANCE_METRIC]);
+    out.set(r.unifiedScreenName, cur);
+  }
+  return [...out.values()];
+}
+
 export async function v140SecondsByScreen(client, property, dateRanges) {
+  if (!dateRanges) return new Map();
   const rows = await report(client, property, {
     dateRanges,
     dimensions: [{ name: 'unifiedScreenName' }, { name: 'appVersion' }],

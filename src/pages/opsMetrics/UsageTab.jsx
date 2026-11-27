@@ -273,8 +273,8 @@ export default function UsageTab() {
               <HintText>
                 조회수는 다른 화면을 닫고 돌아온 복귀까지 포함(앱 1.4.0~) ·{' '}
                 {entranceAvailable
-                  ? '진입 수는 새로 연 경우(is_entrance=1)만, 1.4.0 이전 데이터는 0 · 진입당 평균은 1.4.0 이상 체류 시간 ÷ 진입 수'
-                  : '진입 수는 GA4 맞춤 측정기준 is_entrance 등록 후 표시'}{' '}
+                  ? '진입 수는 새로 연 경우(is_entrance=1)만, 앱 1.4.0 이상·11/27 이후 이벤트만 집계 · 진입당 평균은 같은 구간 체류 시간 ÷ 진입 수'
+                  : '진입 수는 GA4 맞춤 측정항목 is_entrance 등록 후 표시'}{' '}
                 ·{' '}
                 {byScreenClass
                   ? '탐험 탭 합계는 exploration(1.3.x)과 screen_class 가 exploration 인 화면 전체(뽑기·탐험 안 상세 포함)를 합친 값'
